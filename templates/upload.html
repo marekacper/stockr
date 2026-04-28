@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Import — Mój portfel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0f1117; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px; }
+    .nav-link { color: #64748b; text-decoration: none; font-size: 13px; transition: color .15s; }
+    .nav-link:hover { color: #e2e8f0; }
+    table { border-collapse: collapse; width: 100%; }
+    select {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 8px;
+      padding: 8px 12px; color: #e2e8f0; font-size: 13px; outline: none; width: 100%;
+    }
+    select:focus { border-color: #6366f1; }
+    .drop-zone { border: 2px dashed #2d3148; border-radius: 10px; padding: 32px; text-align: center; transition: border-color .2s; }
+    .drop-zone.dragover { border-color: #6366f1; background: #6366f108; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<nav style="background:#13151f;border-bottom:1px solid #1e2235;" class="px-6 py-3 flex items-center gap-6 sticky top-0 z-10">
+  <span style="color:#a5b4fc;font-weight:600;font-size:15px;">📊 Portfel</span>
+  <a href="/dashboard" class="nav-link">Dashboard</a>
+  <a href="/table" class="nav-link">Tabela</a>
+  <a href="/add" class="nav-link">+ Transakcja</a>
+  <a href="/upload" class="nav-link" style="color:#e2e8f0;">Import</a>
+</nav>
+
+<div class="p-4 md:p-6 max-w-4xl mx-auto">
+
+  <!-- Upload form -->
+  <div class="card p-6 mb-5">
+    <h1 style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px;">Importuj transakcje</h1>
+    <p style="font-size:12px;color:#475569;margin-bottom:20px;">
+      Obsługiwane formaty: <strong style="color:#94a3b8;">XTB (.xlsx)</strong> i <strong style="color:#94a3b8;">Obligacje skarbowe (.xls)</strong>. Duplikaty są pomijane automatycznie.
+    </p>
+
+    <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form">
+
+      <!-- Wybór portfela -->
+      <div style="margin-bottom:16px;">
+        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:6px;">Importuj do portfela</label>
+        <select name="portfolio_id">
+          {% for p in portfolios %}
+          <option value="{{ p.id }}">{{ p.name }}{% if p.description %} — {{ p.description }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Drop zone -->
+      <div class="drop-zone" id="drop-zone"
+           ondragover="event.preventDefault();this.classList.add('dragover')"
+           ondragleave="this.classList.remove('dragover')"
+           ondrop="handleDrop(event)">
+        <div style="font-size:28px;margin-bottom:8px;">📂</div>
+        <p style="font-size:13px;color:#64748b;margin-bottom:12px;">Przeciągnij pliki lub kliknij aby wybrać</p>
+        <input name="files" type="file" accept=".xlsx,.xls" multiple id="file-input"
+          onchange="updateFileList(this)" style="display:none;">
+        <label for="file-input"
+          style="background:#1e2235;border:1px solid #2d3148;color:#94a3b8;padding:7px 18px;
+                 border-radius:8px;font-size:12px;cursor:pointer;display:inline-block;">
+          Wybierz pliki
+        </label>
+        <div id="file-list" style="margin-top:12px;font-size:12px;color:#64748b;"></div>
+      </div>
+
+      <button type="submit"
+        style="width:100%;background:#6366f1;color:#fff;border:none;border-radius:8px;
+               padding:10px;font-size:13px;font-weight:500;cursor:pointer;margin-top:16px;">
+        Importuj
+      </button>
+    </form>
+
+    {% if result %}
+    <div style="margin-top:20px;border-top:1px solid #1e2235;padding-top:20px;">
+      <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:12px;">Wynik importu</h2>
+      {% for r in result %}
+      <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #1a1d2a;font-size:13px;">
+        <span style="color:#64748b;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.filename }}</span>
+        <span style="color:#34d399;font-weight:500;white-space:nowrap;">+{{ r.added }} nowych</span>
+        {% if r.skipped %}<span style="color:#475569;white-space:nowrap;">{{ r.skipped }} pominiętych</span>{% endif %}
+        {% if r.error %}<span style="color:#f87171;">❌ {{ r.error }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Historia importów -->
+  <div class="card p-5">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h2 style="font-size:13px;font-weight:600;color:#fff;">Historia importów</h2>
+      <span style="font-size:11px;color:#475569;" id="imports-count"></span>
+    </div>
+    <div class="overflow-x-auto">
+      <table>
+        <thead>
+          <tr style="border-bottom:1px solid #1e2235;font-size:11px;color:#475569;text-transform:uppercase;">
+            <th style="text-align:left;padding:8px 12px;">Data importu</th>
+            <th style="text-align:left;padding:8px 12px;">Plik</th>
+            <th style="text-align:left;padding:8px 12px;">Portfel</th>
+            <th style="text-align:left;padding:8px 12px;">Typ</th>
+            <th style="text-align:right;padding:8px 12px;">Dodano</th>
+            <th style="text-align:right;padding:8px 12px;">Pominiętych</th>
+            <th style="text-align:center;padding:8px 12px;">Akcje</th>
+          </tr>
+        </thead>
+        <tbody id="imports-table">
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:#475569;">Ładowanie...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Drag & drop obsługa
+function handleDrop(event) {
+  event.preventDefault();
+  document.getElementById('drop-zone').classList.remove('dragover');
+  const input = document.getElementById('file-input');
+  const dt = new DataTransfer();
+  Array.from(event.dataTransfer.files).forEach(f => dt.items.add(f));
+  input.files = dt.files;
+  updateFileList(input);
+}
+
+function updateFileList(input) {
+  const list = document.getElementById('file-list');
+  if (!input.files.length) { list.textContent = ''; return; }
+  list.innerHTML = Array.from(input.files).map(f =>
+    `<div style="margin-top:4px;">📄 ${f.name} <span style="color:#334155;">(${(f.size/1024).toFixed(1)} KB)</span></div>`
+  ).join('');
+}
+
+// Historia importów
+async function loadImports() {
+  const resp = await fetch('/api/imports');
+  const data = await resp.json();
+  const tbody = document.getElementById('imports-table');
+  document.getElementById('imports-count').textContent = `${data.length} plików`;
+
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#475569;">Brak importów</td></tr>';
+    return;
+  }
+
+  data.sort((a, b) => b.id.localeCompare(a.id));
+
+  tbody.innerHTML = data.map(r => `
+    <tr style="border-bottom:1px solid #1a1d2a;transition:background .1s;"
+        onmouseover="this.style.background='#1e2235'"
+        onmouseout="this.style.background='transparent'">
+      <td style="padding:9px 12px;color:#64748b;font-size:13px;white-space:nowrap;">${r.imported_at}</td>
+      <td style="padding:9px 12px;font-size:13px;color:#e2e8f0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.filename}">
+        ${r.filename}
+      </td>
+      <td style="padding:9px 12px;font-size:13px;color:#94a3b8;white-space:nowrap;">
+        ${r.portfolio_name || r.portfolio_id || '—'}
+      </td>
+      <td style="padding:9px 12px;font-size:13px;">
+        <span style="padding:2px 8px;border-radius:99px;font-size:11px;
+          background:${r.type === 'XTB' ? '#6366f120' : '#f59e0b20'};
+          color:${r.type === 'XTB' ? '#a5b4fc' : '#fbbf24'};">
+          ${r.type}
+        </span>
+      </td>
+      <td style="padding:9px 12px;text-align:right;color:#34d399;font-size:13px;font-weight:500;">+${r.added}</td>
+      <td style="padding:9px 12px;text-align:right;color:#475569;font-size:13px;">${r.skipped}</td>
+      <td style="padding:9px 12px;text-align:center;">
+        <button onclick="deleteImport('${r.id}', '${r.filename}')"
+          style="background:#f4375015;border:1px solid #f4375030;color:#f87171;border-radius:6px;
+                 padding:3px 10px;font-size:11px;cursor:pointer;">
+          Usuń
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function deleteImport(id, filename) {
+  if (!confirm(`Usunąć "${filename}" z historii?\n\nUWAGA: transakcje NIE zostaną usunięte z portfela.`)) return;
+  const resp = await fetch(`/api/imports/${id}`, { method: 'DELETE' });
+  const data = await resp.json();
+  if (data.ok) loadImports();
+  else alert('Błąd: ' + (data.error || 'nieznany'));
+}
+
+loadImports();
+</script>
+</body>
+</html>

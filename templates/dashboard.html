@@ -1,0 +1,1703 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mój portfel — Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0f1117; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 99px; font-size: 12px;
+      cursor: pointer; border: 1px solid #2d3148;
+      color: #94a3b8; transition: all .15s;
+    }
+    .chip.active { border-color: #6366f1; background: #6366f118; color: #a5b4fc; }
+    .chip:hover { border-color: #6366f180; }
+    select, input[type=text], input[type=date] {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 8px;
+      padding: 5px 10px; color: #e2e8f0; font-size: 12px; outline: none;
+    }
+    select:focus, input[type=text]:focus, input[type=date]:focus { border-color: #6366f1; }
+    table { border-collapse: collapse; width: 100%; }
+    .nav-link { color: #64748b; text-decoration: none; font-size: 13px; transition: color .15s; }
+    .nav-link:hover { color: #e2e8f0; }
+    .metric-card {
+      position: relative; text-align: center; padding: 12px;
+      background: #0f1117; border-radius: 8px; cursor: help;
+    }
+    .metric-tooltip {
+      display: none; position: absolute; bottom: calc(100% + 8px); left: 50%;
+      transform: translateX(-50%); background: #1e2235; border: 1px solid #2d3148;
+      border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #94a3b8;
+      width: 220px; z-index: 99; line-height: 1.5; text-align: left; pointer-events: none;
+    }
+    .metric-card:hover .metric-tooltip { display: block; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<!-- Nav -->
+<nav style="background:#13151f;border-bottom:1px solid #1e2235;" class="px-6 py-3 flex items-center gap-6 sticky top-0 z-10">
+  <span style="color:#a5b4fc;font-weight:600;font-size:15px;">📊 Portfel</span>
+  <a href="/dashboard?portfolio_id={{ portfolio_id }}" class="nav-link" style="color:#e2e8f0;">Dashboard</a>
+  <a href="/table?portfolio_id={{ portfolio_id }}" class="nav-link">Tabela</a>
+  <a href="/add?portfolio_id={{ portfolio_id }}" class="nav-link">+ Transakcja</a>
+  <a href="/upload" class="nav-link">Import</a>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <span style="font-size:11px;color:#475569;">Portfel:</span>
+    <select id="portfolio-select" onchange="switchPortfolio(this.value)"
+      style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:5px 10px;color:#e2e8f0;font-size:12px;max-width:180px;">
+      {% for p in portfolios %}
+      <option value="{{ p.id }}" {% if p.id == portfolio_id %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+    <button onclick="showNewPortfolioModal()"
+      style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">
+      + Nowy
+    </button>
+    {% if portfolio_id != 'default' %}
+    <button onclick="confirmDeletePortfolio()"
+      style="background:#f4375015;color:#f87171;border:1px solid #f4375030;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">
+      Usuń
+    </button>
+    {% endif %}
+  </div>
+</nav>
+
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+
+  <!-- Nagłówek -->
+  <div style="margin-bottom:16px;">
+    <h1 style="font-size:18px;font-weight:600;color:#fff;">{{ current_portfolio.name }}</h1>
+    {% if current_portfolio.description %}
+    <p style="font-size:12px;color:#475569;margin-top:2px;">{{ current_portfolio.description }}</p>
+    {% endif %}
+  </div>
+
+  <!-- Karty podsumowania -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">WARTOŚĆ PORTFELA</div>
+      <div style="font-size:20px;font-weight:600;color:#fff;">{{ "%.2f"|format(total_value) }} PLN</div>
+    </div>
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">ZAINWESTOWANO</div>
+      <div style="font-size:20px;font-weight:600;color:#fff;">{{ "%.2f"|format(total_cost) }} PLN</div>
+    </div>
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">ZYSK / STRATA</div>
+      <div style="font-size:20px;font-weight:600;color:{% if total_pnl >= 0 %}#34d399{% else %}#f87171{% endif %};">
+        {{ "%+.2f"|format(total_pnl) }} PLN
+      </div>
+    </div>
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">STOPA ZWROTU</div>
+      <div style="font-size:20px;font-weight:600;color:{% if total_pnl >= 0 %}#34d399{% else %}#f87171{% endif %};">
+        {% if total_cost > 0 %}{{ "%+.2f"|format(total_pnl / total_cost * 100) }}%{% else %}—{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Wartość w czasie -->
+  <div class="card p-5 mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <h2 style="font-size:13px;font-weight:600;color:#fff;">Wartość portfela w czasie</h2>
+      <select id="range1" onchange="updateValueChart()">
+        <option value="30">30 dni</option>
+        <option value="90">3 miesiące</option>
+        <option value="180">6 miesięcy</option>
+        <option value="365" selected>1 rok</option>
+        <option value="9999">Wszystko</option>
+      </select>
+    </div>
+    <div id="ticker-chips" class="flex flex-wrap gap-2 mb-4"></div>
+    <canvas id="chart-value" height="80"></canvas>
+  </div>
+
+  <!-- Zysk/Strata -->
+  <div class="card p-5 mb-4">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Zysk / Strata w czasie (PLN)</h2>
+    <canvas id="chart-pnl" height="60"></canvas>
+  </div>
+
+  <!-- Pie + Wpłaty -->
+  <div class="grid md:grid-cols-2 gap-4 mb-4">
+    <div class="card p-5">
+      <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Struktura portfela</h2>
+      <canvas id="chart-pie" height="200"></canvas>
+    </div>
+    <div class="card p-5">
+      <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Wpłaty vs wartość</h2>
+      <canvas id="chart-invested" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- Słupki aktywów -->
+  <div class="card p-5 mb-4">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Udział aktywów</h2>
+    <div id="bar-chart-container"></div>
+  </div>
+
+  <!-- Wskaźniki ryzyka -->
+  <div class="card p-5 mb-4">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Wskaźniki ryzyka</h2>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+      <div class="metric-card">
+        <div class="metric-tooltip">Annualizowana stopa zwrotu TWR — oczyszczona z efektu wpłat. Pokazuje czysty wynik inwestycyjny, jakby portfel rósł przez pełny rok.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">ROCZNA STOPA ZWROTU</div>
+        <div id="m-annual" style="font-size:18px;font-weight:600;">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-tooltip">Zmienność roczna — jak bardzo wartość portfela waha się w górę i w dół. Niżej = stabilniej. S&amp;P500 ma ~15-20%, portfel agresywny może mieć 25-40%.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">ZMIENNOŚĆ (ROK)</div>
+        <div id="m-vol" style="font-size:18px;font-weight:600;">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-tooltip">Sharpe Ratio — ile zysku dostajesz na jednostkę ryzyka (ponad stopę wolną od ryzyka ~5.5%). Powyżej 1 = dobry. Powyżej 2 = świetny. Poniżej 0 = nie warto.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">SHARPE RATIO</div>
+        <div id="m-sharpe" style="font-size:18px;font-weight:600;">—</div>
+        <div style="font-size:10px;color:#334155;margin-top:2px;">&gt;1 dobry · &gt;2 świetny</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-tooltip">Największy spadek od szczytu do dołka w całej historii portfela. Im mniejsza liczba (bliżej 0) tym lepiej. Dobry portfel ma max drawdown poniżej -20%.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">MAX DRAWDOWN</div>
+        <div id="m-maxdd" style="font-size:18px;font-weight:600;color:#f87171;">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-tooltip">Procent dni kiedy portfel zakończył na plusie względem poprzedniego dnia. Powyżej 55% to dobry wynik. Rynki akcji mają zwykle 52-54%.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">WIN RATE</div>
+        <div id="m-winrate" style="font-size:18px;font-weight:600;">—</div>
+        <div style="font-size:10px;color:#334155;margin-top:2px;">dni z zyskiem</div>
+      </div>
+    </div>
+    <div class="grid grid-cols-3 gap-3">
+      <div class="metric-card">
+        <div class="metric-tooltip">Sortino Ratio — podobny do Sharpe, ale liczy ryzyko tylko z dni stratnych. Lepiej odzwierciedla rzeczywiste ryzyko bo nie karze za duże wzrosty. Powyżej 1 = dobry.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">SORTINO RATIO</div>
+        <div id="m-sortino" style="font-size:16px;font-weight:600;">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-tooltip">Największy jednodniowy wzrost portfela (oczyszczony z wpłat). Pokazuje maksymalny potencjał zysku w jednym dniu.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">NAJLEPSZY DZIEŃ</div>
+        <div id="m-best" style="font-size:16px;font-weight:600;color:#34d399;">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-tooltip">Największy jednodniowy spadek portfela (oczyszczony z wpłat). Pokazuje maksymalne ryzyko straty w jednym dniu. Dla S&amp;P500 najgorszy dzień to ok. -12%.</div>
+        <div style="font-size:10px;color:#475569;margin-bottom:4px;">NAJGORSZY DZIEŃ</div>
+        <div id="m-worst" style="font-size:16px;font-weight:600;color:#f87171;">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawdown -->
+  <div class="card p-5 mb-4">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Drawdown od szczytu</h2>
+    <canvas id="chart-drawdown" height="50"></canvas>
+  </div>
+
+<!-- Korelacja aktywów -->
+<div class="card p-5 mb-4">
+  <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">
+    Korelacja aktywów
+    <span style="font-size:11px;color:#475569;font-weight:400;margin-left:8px;">
+      -1 = przeciwne · 0 = brak · +1 = identyczne ruchy
+    </span>
+  </h2>
+  <div id="correlation-container" style="overflow-x:auto;">
+    <p style="color:#475569;font-size:12px;">Ładowanie...</p>
+  </div>
+</div>
+
+<!-- Rebalancing -->
+<div class="card p-5 mb-4">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;">Rebalancing</h2>
+    <button onclick="toggleRebalancingEdit()"
+      style="background:#1e2235;border:1px solid #2d3148;color:#94a3b8;border-radius:8px;
+             padding:4px 12px;font-size:12px;cursor:pointer;" id="rebal-edit-btn">
+        Edytuj cele
+    </button>
+  </div>
+
+  <!-- Edytor celów -->
+  <div id="rebal-editor" style="display:none;margin-bottom:16px;padding:16px;background:#0f1117;border-radius:8px;">
+    <p style="font-size:12px;color:#64748b;margin-bottom:12px;">
+      Ustaw docelowe wagi dla każdej kategorii (suma powinna wynosić 100%):
+    </p>
+    <div id="rebal-inputs"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+      <button onclick="saveRebalancing()"
+        style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:12px;cursor:pointer;">
+        Zapisz
+      </button>
+      <span id="rebal-sum-indicator" style="font-size:12px;color:#64748b;"></span>
+    </div>
+  </div>
+
+  <div id="rebalancing-container">
+    <p style="color:#475569;font-size:12px;">Ładowanie...</p>
+  </div>
+</div>
+
+<!-- Monte Carlo -->
+<div class="card p-5 mb-4">
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:16px;">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;">Symulacja Monte Carlo</h2>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <select id="mc-years" onchange="loadMonteCarlo()"
+        style="font-size:12px;padding:4px 8px;">
+        <option value="1">1 rok</option>
+        <option value="3">3 lata</option>
+        <option value="5" selected>5 lat</option>
+        <option value="10">10 lat</option>
+      </select>
+      <span style="font-size:12px;color:#475569;">Miesięczna wpłata:</span>
+      <input type="number" id="mc-monthly" value="0" min="0" step="500"
+        style="width:100px;font-size:12px;padding:4px 8px;"
+        onchange="loadMonteCarlo()">
+      <span style="font-size:12px;color:#475569;">PLN</span>
+    </div>
+  </div>
+  <div id="mc-stats" style="display:none;" class="grid grid-cols-3 gap-3 mb-4">
+    <div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;">
+      <div style="font-size:10px;color:#475569;margin-bottom:4px;">MEDIANA ZA X LAT</div>
+      <div id="mc-median" style="font-size:16px;font-weight:600;color:#fff;">—</div>
+    </div>
+    <div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;">
+      <div style="font-size:10px;color:#475569;margin-bottom:4px;">SZANSA NA ZYSK</div>
+      <div id="mc-prob-profit" style="font-size:16px;font-weight:600;color:#34d399;">—</div>
+    </div>
+    <div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;">
+      <div style="font-size:10px;color:#475569;margin-bottom:4px;">SZANSA NA 2X</div>
+      <div id="mc-prob-double" style="font-size:16px;font-weight:600;color:#a5b4fc;">—</div>
+    </div>
+  </div>
+  <canvas id="chart-montecarlo" height="70"></canvas>
+</div>
+<!-- DYWIDENDY -->
+<div class="card p-5 mb-4">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;">Dywidendy</h2>
+    <button onclick="toggleDivForm()"
+      style="background:#1e2235;border:1px solid #2d3148;color:#94a3b8;border-radius:8px;padding:4px 12px;font-size:12px;cursor:pointer;">
+      + Dodaj ręcznie
+    </button>
+  </div>
+
+  <!-- Karty -->
+  <div class="grid grid-cols-3 gap-3 mb-4">
+    <div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;">
+      <div style="font-size:10px;color:#475569;margin-bottom:4px;">OTRZYMANO ŁĄCZNIE</div>
+      <div id="div-total" style="font-size:18px;font-weight:600;color:#34d399;">—</div>
+    </div>
+    <div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;">
+      <div style="font-size:10px;color:#475569;margin-bottom:4px;">PROGNOZA ROCZNA</div>
+      <div id="div-annual" style="font-size:18px;font-weight:600;color:#fff;">—</div>
+    </div>
+    <div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;">
+      <div style="font-size:10px;color:#475569;margin-bottom:4px;">PROGNOZA MIESIĘCZNA</div>
+      <div id="div-monthly" style="font-size:18px;font-weight:600;color:#fff;">—</div>
+    </div>
+  </div>
+
+  <!-- Formularz dodawania -->
+  <div id="div-form" style="display:none;padding:16px;background:#0f1117;border-radius:8px;margin-bottom:16px;">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Ticker</label>
+        <input type="text" id="div-ticker" placeholder="np. DIG.PL"
+          style="width:100%;font-size:12px;padding:6px 10px;">
+      </div>
+      <div>
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Kwota (PLN)</label>
+        <input type="number" id="div-amount" step="0.01" min="0"
+          style="width:100%;font-size:12px;padding:6px 10px;">
+      </div>
+      <div>
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Data</label>
+        <input type="date" id="div-date"
+          style="width:100%;font-size:12px;padding:6px 10px;">
+      </div>
+      <div style="display:flex;align-items:flex-end;">
+        <button onclick="saveDividend()"
+          style="width:100%;background:#6366f1;color:#fff;border:none;border-radius:8px;padding:7px;font-size:12px;cursor:pointer;">
+          Zapisz
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Heatmapa -->
+  <div id="div-heatmap" style="margin-bottom:16px;"></div>
+
+  <!-- Lista -->
+  <div id="div-list" style="font-size:12px;color:#475569;">Ładowanie...</div>
+</div>
+
+<!-- CELE INWESTYCYJNE -->
+<!-- CELE INWESTYCYJNE -->
+<div class="card p-5 mb-4">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;">Cele inwestycyjne</h2>
+    <button onclick="toggleGoalForm()"
+      style="background:#1e2235;border:1px solid #2d3148;color:#94a3b8;border-radius:8px;padding:4px 12px;font-size:12px;cursor:pointer;">
+      + Dodaj cel
+    </button>
+  </div>
+
+  <!-- Kalkulator interaktywny -->
+  <div id="goal-form" style="display:none;padding:20px;background:#0f1117;border-radius:10px;margin-bottom:16px;">
+    <h3 style="font-size:12px;color:#94a3b8;margin-bottom:16px;font-weight:500;">Nowy cel inwestycyjny</h3>
+
+    <div style="margin-bottom:14px;">
+      <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Nazwa celu</label>
+      <input type="text" id="goal-name" placeholder="np. Emerytura, mieszkanie, poduszka"
+        style="width:100%;font-size:13px;padding:8px 12px;">
+    </div>
+
+    <!-- Tryb kalkulatora -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <button id="goal-mode-target" onclick="setGoalMode('target')"
+        style="flex:1;padding:8px;border-radius:8px;font-size:12px;cursor:pointer;
+               background:#6366f1;color:#fff;border:none;font-weight:500;">
+        🎯 Chcę zebrać X PLN
+      </button>
+      <button id="goal-mode-monthly" onclick="setGoalMode('monthly')"
+        style="flex:1;padding:8px;border-radius:8px;font-size:12px;cursor:pointer;
+               background:#1e2235;color:#94a3b8;border:1px solid #2d3148;">
+        💰 Mogę wpłacać X PLN/mies.
+      </button>
+    </div>
+
+    <!-- Tryb 1: Chcę zebrać X PLN -->
+    <div id="goal-fields-target">
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Kwota docelowa (PLN)</label>
+          <input type="number" id="goal-target" step="1000" min="0" placeholder="500 000"
+            oninput="calcGoal()" style="width:100%;font-size:13px;padding:8px 12px;">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Termin</label>
+          <input type="date" id="goal-deadline" oninput="calcGoal()"
+            style="width:100%;font-size:13px;padding:8px 12px;">
+        </div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">
+          Zakładana stopa zwrotu rocznie: <span id="goal-rate-label">7</span>%
+        </label>
+        <input type="range" id="goal-rate" min="1" max="20" value="7" step="0.5"
+          oninput="document.getElementById('goal-rate-label').textContent=this.value;calcGoal()"
+          style="width:100%;accent-color:#6366f1;">
+      </div>
+
+      <!-- Wynik trybu 1 -->
+      <div id="goal-result-target" style="display:none;padding:16px;background:#1a1d27;border-radius:8px;margin-bottom:12px;">
+        <div class="grid grid-cols-3 gap-3 mb-3">
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#475569;margin-bottom:4px;">MIESIĘCZNA WPŁATA</div>
+            <div id="goal-calc-monthly" style="font-size:20px;font-weight:700;color:#6366f1;">—</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#475569;margin-bottom:4px;">ŁĄCZNE WPŁATY</div>
+            <div id="goal-calc-contributions" style="font-size:20px;font-weight:700;color:#fff;">—</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#475569;margin-bottom:4px;">ZYSK Z INWESTYCJI</div>
+            <div id="goal-calc-gain" style="font-size:20px;font-weight:700;color:#34d399;">—</div>
+          </div>
+        </div>
+        <canvas id="goal-chart" height="50"></canvas>
+      </div>
+    </div>
+
+    <!-- Tryb 2: Mogę wpłacać X PLN/mies. -->
+    <div id="goal-fields-monthly" style="display:none;">
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Miesięczna wpłata (PLN)</label>
+          <input type="number" id="goal-monthly-input" step="100" min="0" placeholder="1 000"
+            oninput="calcGoalFromMonthly()" style="width:100%;font-size:13px;padding:8px 12px;">
+        </div>
+        <div>
+          <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Przez ile lat</label>
+          <input type="number" id="goal-years-input" step="1" min="1" max="40" placeholder="10"
+            oninput="calcGoalFromMonthly()" style="width:100%;font-size:13px;padding:8px 12px;">
+        </div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">
+          Zakładana stopa zwrotu rocznie: <span id="goal-rate-label2">7</span>%
+        </label>
+        <input type="range" id="goal-rate2" min="1" max="20" value="7" step="0.5"
+          oninput="document.getElementById('goal-rate-label2').textContent=this.value;calcGoalFromMonthly()"
+          style="width:100%;accent-color:#6366f1;">
+      </div>
+
+      <!-- Wynik trybu 2 -->
+      <div id="goal-result-monthly" style="display:none;padding:16px;background:#1a1d27;border-radius:8px;margin-bottom:12px;">
+        <div class="grid grid-cols-3 gap-3 mb-3">
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#475569;margin-bottom:4px;">ZBIERZESZ</div>
+            <div id="goal-calc-total" style="font-size:20px;font-weight:700;color:#6366f1;">—</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#475569;margin-bottom:4px;">ŁĄCZNE WPŁATY</div>
+            <div id="goal-calc-contributions2" style="font-size:20px;font-weight:700;color:#fff;">—</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#475569;margin-bottom:4px;">ZYSK Z INWESTYCJI</div>
+            <div id="goal-calc-gain2" style="font-size:20px;font-weight:700;color:#34d399;">—</div>
+          </div>
+        </div>
+        <canvas id="goal-chart2" height="50"></canvas>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button onclick="saveGoal()"
+        style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:12px;cursor:pointer;font-weight:500;">
+        Zapisz cel
+      </button>
+      <button onclick="toggleGoalForm()"
+        style="background:#1e2235;color:#94a3b8;border:1px solid #2d3148;border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;">
+        Anuluj
+      </button>
+    </div>
+  </div>
+
+  <div id="goals-list">
+    <p style="color:#475569;font-size:12px;">Brak celów. Dodaj pierwszy cel.</p>
+  </div>
+</div>
+
+<!-- ALERTY -->
+<div class="card p-5 mb-4">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;">Alerty</h2>
+    <button onclick="toggleAlertForm()"
+      style="background:#1e2235;border:1px solid #2d3148;color:#94a3b8;border-radius:8px;padding:4px 12px;font-size:12px;cursor:pointer;">
+      + Nowy alert
+    </button>
+  </div>
+
+  <!-- Wyzwolone alerty -->
+  <div id="alerts-triggered"></div>
+
+  <!-- Formularz -->
+  <div id="alert-form" style="display:none;padding:16px;background:#0f1117;border-radius:8px;margin-bottom:16px;">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+      <div>
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Typ</label>
+        <select id="alert-type" onchange="updateAlertForm()" style="width:100%;font-size:12px;padding:6px 10px;">
+          <option value="price">Cena spółki</option>
+          <option value="portfolio_value">Wartość portfela</option>
+          <option value="portfolio_pnl_pct">Zysk/Strata %</option>
+        </select>
+      </div>
+      <div id="alert-ticker-wrap">
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Ticker</label>
+        <select id="alert-ticker" style="width:100%;font-size:12px;padding:6px 10px;">
+          {% for t in tickers %}
+          <option value="{{ t }}">{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;">Warunek</label>
+        <select id="alert-condition" style="width:100%;font-size:12px;padding:6px 10px;">
+          <option value="below">Spadnie poniżej</option>
+          <option value="above">Wzrośnie powyżej</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px;" id="alert-value-label">Wartość (PLN)</label>
+        <input type="number" id="alert-value" step="0.01"
+          style="width:100%;font-size:12px;padding:6px 10px;">
+      </div>
+    </div>
+    <button onclick="saveAlert()"
+      style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:7px 20px;font-size:12px;cursor:pointer;">
+      Dodaj alert
+    </button>
+  </div>
+
+  <div id="alerts-list">
+    <p style="color:#475569;font-size:12px;">Brak alertów.</p>
+  </div>
+</div>
+
+  <!-- Benchmark -->
+  <div class="card p-5 mb-4">
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <h2 style="font-size:13px;font-weight:600;color:#fff;">Benchmark</h2>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:#475569;">Od:</span>
+        <select id="bench-start" onchange="renderBenchChart()">
+          <option value="all">Początku portfela</option>
+          <option value="30">30 dni</option>
+          <option value="90">3 miesiące</option>
+          <option value="180">6 miesięcy</option>
+          <option value="365">1 rok</option>
+          <option value="custom">Własna data</option>
+        </select>
+        <input type="date" id="bench-start-custom" onchange="renderBenchChart()" style="display:none;">
+      </div>
+      <div class="flex flex-wrap gap-2" id="bench-chips">
+        <div class="chip" id="bchip-SPY" onclick="selectBenchmark('SPY', this)">S&amp;P 500</div>
+        <div class="chip" id="bchip-QQQ" onclick="selectBenchmark('QQQ', this)">NASDAQ 100</div>
+        <div class="chip" id="bchip-VUAA.DE" onclick="selectBenchmark('VUAA.DE', this)">ETF S&amp;P500</div>
+        <div class="chip" id="bchip-VWCE.DE" onclick="selectBenchmark('VWCE.DE', this)">ETF Świat</div>
+        <div class="chip" id="bchip-IS3N.DE" onclick="selectBenchmark('IS3N.DE', this)">ETF Em. Markets</div>
+        <div class="chip" id="bchip-GLD" onclick="selectBenchmark('GLD', this)">Złoto</div>
+        <div class="chip" id="bchip-BTC-USD" onclick="selectBenchmark('BTC-USD', this)">Bitcoin</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input type="text" id="bench-ticker" placeholder="Własny ticker..." style="width:140px;"
+          onkeydown="if(event.key==='Enter') loadBenchmark()">
+        <button onclick="loadBenchmark()"
+          style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;">
+          Dodaj
+        </button>
+      </div>
+      <span id="bench-status" style="font-size:12px;color:#64748b;"></span>
+    </div>
+    <div id="active-benches" class="flex flex-wrap gap-2 mb-3"></div>
+    <canvas id="chart-bench" height="60"></canvas>
+  </div>
+
+</div><!-- end container -->
+
+<!-- Modal nowy portfel -->
+<div id="modal-bg" onclick="hideModal()" style="display:none;position:fixed;inset:0;background:#00000080;z-index:50;"></div>
+<div id="modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:#1a1d27;border:1px solid #2d3148;border-radius:16px;padding:28px;width:360px;z-index:51;">
+  <h2 style="font-size:15px;font-weight:600;color:#fff;margin-bottom:20px;">Nowy portfel</h2>
+  <div style="margin-bottom:12px;">
+    <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px;">Nazwa</label>
+    <input id="new-portfolio-name" type="text" placeholder="np. Obligacje, Spółki PL..."
+      style="width:100%;background:#0f1117;border:1px solid #2d3148;border-radius:8px;
+             padding:8px 12px;color:#e2e8f0;font-size:13px;outline:none;"
+      onkeydown="if(event.key==='Enter') createPortfolio()">
+  </div>
+  <div style="margin-bottom:20px;">
+    <label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px;">Opis (opcjonalnie)</label>
+    <input id="new-portfolio-desc" type="text" placeholder="Krótki opis..."
+      style="width:100%;background:#0f1117;border:1px solid #2d3148;border-radius:8px;
+             padding:8px 12px;color:#e2e8f0;font-size:13px;outline:none;">
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button onclick="hideModal()"
+      style="flex:1;background:#1e2235;color:#94a3b8;border:1px solid #2d3148;border-radius:8px;padding:8px;font-size:13px;cursor:pointer;">
+      Anuluj
+    </button>
+    <button onclick="createPortfolio()"
+      style="flex:1;background:#6366f1;color:#fff;border:none;border-radius:8px;padding:8px;font-size:13px;cursor:pointer;font-weight:500;">
+      Utwórz
+    </button>
+  </div>
+</div>
+
+<!-- Modal wykres spółki -->
+<div id="ticker-modal-bg" onclick="closeTickerModal()"
+  style="display:none;position:fixed;inset:0;background:#00000090;z-index:60;"></div>
+<div id="ticker-modal"
+  style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:#1a1d27;border:1px solid #2d3148;border-radius:16px;padding:24px;
+  width:90%;max-width:800px;z-index:61;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <h2 id="ticker-modal-title" style="font-size:15px;font-weight:600;color:#fff;">—</h2>
+    <button onclick="closeTickerModal()"
+      style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;line-height:1;">×</button>
+  </div>
+  <canvas id="chart-ticker" height="60"></canvas>
+  <div id="ticker-tx-list" style="margin-top:16px;font-size:12px;color:#64748b;line-height:1.8;"></div>
+</div>
+
+<script>
+const TICKERS = {{ tickers | tojson }};
+const PORTFOLIO = {{ portfolio | tojson }};
+const PRICES = {{ prices | tojson }};
+const PORTFOLIO_ID = "{{ portfolio_id }}";
+
+const COLORS = [
+  '#6366f1','#22d3ee','#f59e0b','#10b981','#f43f5e',
+  '#a78bfa','#34d399','#fb923c','#38bdf8','#e879f9',
+  '#84cc16','#facc15','#ff6b6b','#4ade80','#60a5fa',
+  '#f472b6','#2dd4bf','#fb7185','#a3e635','#fbbf24',
+];
+
+const BENCH_PRESETS = {
+  'SPY':'S&P 500','QQQ':'NASDAQ 100','VUAA.DE':'ETF S&P500',
+  'VWCE.DE':'ETF Świat','IS3N.DE':'ETF Em. Markets','GLD':'Złoto','BTC-USD':'Bitcoin',
+};
+
+let historyData = null;
+let activeChips = new Set(TICKERS);
+let activeBenches = {};
+let chartValue=null, chartPnl=null, chartPie=null, chartInvested=null, chartBench=null, chartDrawdown=null, chartTicker=null;
+
+// --- PORTFOLIO ---
+function switchPortfolio(id) { window.location.href=`/dashboard?portfolio_id=${id}`; }
+
+function showNewPortfolioModal() {
+  document.getElementById('modal-bg').style.display='block';
+  document.getElementById('modal').style.display='block';
+  setTimeout(()=>document.getElementById('new-portfolio-name').focus(),50);
+}
+function hideModal() {
+  document.getElementById('modal-bg').style.display='none';
+  document.getElementById('modal').style.display='none';
+}
+async function createPortfolio() {
+  const name=document.getElementById('new-portfolio-name').value.trim();
+  if(!name){document.getElementById('new-portfolio-name').focus();return;}
+  const desc=document.getElementById('new-portfolio-desc').value.trim();
+  const resp=await fetch('/api/portfolios',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,description:desc})});
+  const data=await resp.json();
+  window.location.href=`/dashboard?portfolio_id=${data.id}`;
+}
+async function confirmDeletePortfolio() {
+  const sel=document.getElementById('portfolio-select');
+  const name=sel.options[sel.selectedIndex].text;
+  if(!confirm(`Usunąć portfel "${name}"?\n\nTA OPERACJA JEST NIEODWRACALNA.`))return;
+  const resp=await fetch(`/api/portfolios/${PORTFOLIO_ID}`,{method:'DELETE'});
+  const data=await resp.json();
+  if(data.ok) window.location.href='/dashboard?portfolio_id=default';
+  else alert('Błąd: '+data.error);
+}
+
+// --- CHIPS ---
+function initChips() {
+  const container=document.getElementById('ticker-chips');
+  const all=document.createElement('div');
+  all.className='chip active';all.id='chip-all';
+  all.textContent='Wszystkie';all.onclick=toggleAll;
+  container.appendChild(all);
+
+  TICKERS.forEach((t, i) => {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:inline-flex;align-items:center;gap:2px;';
+
+  const chip = document.createElement('div');
+  chip.className = 'chip active'; chip.id = 'chip-' + t;
+  chip.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:${COLORS[i%COLORS.length]};flex-shrink:0"></span>${t}`;
+  chip.onclick = () => toggleChip(t);
+
+  const btn = document.createElement('span');
+btn.title = 'Pokaż wykres spółki';
+btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+</svg>`;
+btn.style.cssText = `
+  cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border-radius:4px;
+  color:#475569;
+  transition:all .15s;
+  flex-shrink:0;
+`;
+btn.onmouseover = () => { btn.style.color='#a5b4fc'; btn.style.background='#6366f118'; };
+btn.onmouseout = () => { btn.style.color='#475569'; btn.style.background='transparent'; };
+btn.onclick = (e) => { e.stopPropagation(); openTickerModal(t); };
+
+  wrap.appendChild(chip);
+  wrap.appendChild(btn);
+  container.appendChild(wrap);
+});
+}
+
+function toggleAll() {
+  if(activeChips.size===TICKERS.length){
+    activeChips.clear();
+    document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+  } else {
+    activeChips=new Set(TICKERS);
+    document.querySelectorAll('.chip').forEach(c=>c.classList.add('active'));
+  }
+  updateValueChart();
+}
+function toggleChip(ticker) {
+  if(activeChips.has(ticker)){activeChips.delete(ticker);document.getElementById('chip-'+ticker).classList.remove('active');}
+  else{activeChips.add(ticker);document.getElementById('chip-'+ticker).classList.add('active');}
+  document.getElementById('chip-all').classList.toggle('active',activeChips.size===TICKERS.length);
+  updateValueChart();
+}
+
+// --- RANGE ---
+function sliceByRange(days) {
+  if(!historyData)return{dates:[],start:0};
+  if(days>=9999)return{dates:historyData.dates,start:0};
+  const cutoff=new Date();cutoff.setDate(cutoff.getDate()-days);
+  const idx=historyData.dates.findIndex(d=>new Date(d)>=cutoff);
+  return{dates:historyData.dates.slice(idx>=0?idx:0),start:idx>=0?idx:0};
+}
+
+// --- CHART OPTIONS ---
+function chartOpts(unit='PLN',spanGaps=false) {
+  return {
+    responsive:true,spanGaps,animation:false,
+    interaction:{mode:'index',intersect:false},
+    plugins:{
+      legend:{labels:{color:'#64748b',font:{size:11},boxWidth:10,padding:12}},
+      tooltip:{backgroundColor:'#1e2235',borderColor:'#2d3148',borderWidth:1,
+        titleColor:'#94a3b8',bodyColor:'#e2e8f0',padding:10,
+        callbacks:{label:ctx=>` ${ctx.dataset.label}: ${(ctx.raw??0).toFixed(2)} ${unit}`}}
+    },
+    scales:{
+      x:{type:'time',time:{unit:'month',tooltipFormat:'dd.MM.yyyy'},
+         ticks:{color:'#334155',font:{size:10},maxTicksLimit:12},grid:{color:'#1a1d2a'}},
+      y:{ticks:{color:'#334155',font:{size:10}},grid:{color:'#1a1d2a'}}
+    }
+  };
+}
+
+// --- HISTORY ---
+async function loadHistory() {
+  const resp=await fetch(`/api/history?portfolio_id=${PORTFOLIO_ID}`);
+  historyData=await resp.json();
+  updateValueChart();updatePnlChart();updateInvestedChart();buildPieChart();
+}
+
+function updateValueChart() {
+  if(!historyData)return;
+  const days=parseInt(document.getElementById('range1').value);
+  const{dates,start}=sliceByRange(days);
+  const datasets=[];
+  TICKERS.forEach((t,i)=>{
+    if(!activeChips.has(t))return;
+    const vals=(historyData[t]||[]).slice(start);
+    if(vals.every(v=>v===0))return;
+    datasets.push({label:t,data:vals,borderColor:COLORS[i%COLORS.length],
+      backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:0.3});
+  });
+  if(activeChips.size>1)datasets.push({label:'TOTAL',data:historyData.total.slice(start),
+    borderColor:'#ffffff',backgroundColor:'#ffffff06',fill:true,borderWidth:2,pointRadius:0,tension:0.3});
+  const ctx=document.getElementById('chart-value').getContext('2d');
+  if(chartValue)chartValue.destroy();
+  chartValue=new Chart(ctx,{type:'line',data:{labels:dates,datasets},options:chartOpts('PLN')});
+}
+
+function updatePnlChart() {
+  if(!historyData)return;
+  const pnl=historyData.total.map((v,i)=>+(v-historyData.invested[i]).toFixed(2));
+  const ctx=document.getElementById('chart-pnl').getContext('2d');
+  if(chartPnl)chartPnl.destroy();
+  chartPnl=new Chart(ctx,{type:'line',data:{labels:historyData.dates,datasets:[{label:'Zysk/Strata',data:pnl,
+    borderColor:'#10b981',
+    backgroundColor:(context)=>{
+      const{ctx:c,chartArea}=context.chart;
+      if(!chartArea)return'#10b98120';
+      const g=c.createLinearGradient(0,chartArea.top,0,chartArea.bottom);
+      g.addColorStop(0,'#10b98130');g.addColorStop(1,'#10b98105');return g;
+    },
+    fill:true,borderWidth:2,pointRadius:0,tension:0.3}]},options:chartOpts('PLN')});
+}
+
+function updateInvestedChart() {
+  if(!historyData)return;
+  const ctx=document.getElementById('chart-invested').getContext('2d');
+  if(chartInvested)chartInvested.destroy();
+  chartInvested=new Chart(ctx,{type:'line',data:{labels:historyData.dates,datasets:[
+    {label:'Wartość',data:historyData.total,borderColor:'#6366f1',backgroundColor:'#6366f112',fill:true,borderWidth:2,pointRadius:0,tension:0.3},
+    {label:'Wpłacono',data:historyData.invested,borderColor:'#f59e0b',borderDash:[5,4],backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:0.3}
+  ]},options:chartOpts('PLN')});
+}
+
+// --- PIE + BAR ---
+async function buildPieChart() {
+  const resp=await fetch(`/api/categories?portfolio_id=${PORTFOLIO_ID}`);
+  const cats=await resp.json();
+  const ctx=document.getElementById('chart-pie').getContext('2d');
+  if(chartPie)chartPie.destroy();
+  chartPie=new Chart(ctx,{type:'doughnut',
+    data:{labels:cats.map(c=>c.category),datasets:[{data:cats.map(c=>c.value),backgroundColor:cats.map(c=>c.color),borderWidth:0,hoverOffset:6}]},
+    options:{animation:false,plugins:{
+      legend:{position:'right',labels:{color:'#64748b',font:{size:11},boxWidth:10,padding:10}},
+      tooltip:{callbacks:{label:ctx=>{const total=ctx.dataset.data.reduce((a,b)=>a+b,0);return` ${ctx.label}: ${ctx.raw.toFixed(2)} PLN (${(ctx.raw/total*100).toFixed(1)}%)`;}}}
+    },cutout:'62%'}
+  });
+  buildBarChart(cats);
+}
+
+function buildBarChart(cats) {
+  const container=document.getElementById('bar-chart-container');
+  if(!container)return;
+  const catColorMap={};
+  cats.forEach(c=>catColorMap[c.category]=c.color);
+
+  function getCategory(ticker) {
+    const t=ticker.toUpperCase();
+    const manual={'VUAA.DE':'ETF','V80A.DE':'ETF','SXRV.DE':'ETF','IUSQ.DE':'ETF',
+      'CNDX.DE':'ETF','CNDX.UK':'ETF','EIMI.UK':'ETF','MSF.DE':'ETF',
+      'AMD.DE':'ETF','NVD.DE':'ETF','CNYA.DE':'ETF','ABEA.DE':'ETF','ETFBS80TR.PL':'ETF',
+      'TOS0428':'Obligacje','TOS0528':'Obligacje','TOS0628':'Obligacje',
+      'TOS0728':'Obligacje','TOS0928':'Obligacje','EDO1135':'Obligacje'};
+    if(manual[t])return manual[t];
+    if(t.endsWith('.WA')||t.endsWith('.PL'))return'Akcje GPW';
+    if(t.endsWith('.DE')||t.endsWith('.UK')||t.endsWith('.L')||t.endsWith('.AS'))return'ETF';
+    return'Inne';
+  }
+
+  const items=[];
+  TICKERS.forEach(t=>{
+    const price=PRICES[t],qty=PORTFOLIO[t]?.quantity;
+    if(price&&qty){const value=price*qty;items.push({ticker:t,value,cat:getCategory(t),color:catColorMap[getCategory(t)]||'#64748b'});}
+  });
+  items.sort((a,b)=>b.value-a.value);
+  if(!items.length){container.innerHTML='<p style="color:#475569;font-size:12px;">Brak danych</p>';return;}
+  const totalValue=items.reduce((s,i)=>s+i.value,0);
+  const maxVal=items[0].value;
+  container.innerHTML=items.map(item=>{
+    const pct=(item.value/totalValue*100).toFixed(1);
+    const barPct=(item.value/maxVal*100).toFixed(1);
+    return`<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;">
+      <div style="width:110px;text-align:right;font-size:12px;color:#e2e8f0;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${item.ticker}">${item.ticker}</div>
+      <div style="flex:1;position:relative;height:22px;background:#1e2235;border-radius:4px;overflow:hidden;">
+        <div style="position:absolute;left:0;top:0;height:100%;width:${barPct}%;background:${item.color};border-radius:4px;opacity:0.85;transition:width .3s;"></div>
+        <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:11px;color:#fff;font-weight:500;z-index:1;">${item.value.toFixed(0)} PLN</span>
+      </div>
+      <div style="width:42px;text-align:right;font-size:12px;color:#64748b;flex-shrink:0;">${pct}%</div>
+    </div>`;
+  }).join('');
+}
+
+// --- ANALYTICS ---
+async function loadAnalytics() {
+  const resp=await fetch(`/api/analytics?portfolio_id=${PORTFOLIO_ID}`);
+  const analyticsData=await resp.json();
+  if(!analyticsData||!analyticsData.metrics)return;
+  const m=analyticsData.metrics;
+
+  const setEl=(id,val,color)=>{const el=document.getElementById(id);if(el){el.textContent=val;if(color)el.style.color=color;}};
+
+  const annColor=m.annual_return>=0?'#34d399':'#f87171';
+  setEl('m-annual',(m.annual_return>0?'+':'')+m.annual_return+'%',annColor);
+  const volColor=m.annual_volatility>20?'#f87171':m.annual_volatility>10?'#f59e0b':'#34d399';
+  setEl('m-vol',m.annual_volatility+'%',volColor);
+  const sharpeColor=m.sharpe_ratio>=2?'#34d399':m.sharpe_ratio>=1?'#f59e0b':'#f87171';
+  setEl('m-sharpe',m.sharpe_ratio,sharpeColor);
+  setEl('m-maxdd',m.max_drawdown+'%','#f87171');
+  const wrColor=m.win_rate>=55?'#34d399':m.win_rate>=50?'#f59e0b':'#f87171';
+  setEl('m-winrate',m.win_rate+'%',wrColor);
+  setEl('m-sortino',m.sortino_ratio,null);
+  setEl('m-best','+'+ m.best_day+'%','#34d399');
+  setEl('m-worst',m.worst_day+'%','#f87171');
+
+  // Drawdown chart
+  const ctx=document.getElementById('chart-drawdown').getContext('2d');
+  if(chartDrawdown)chartDrawdown.destroy();
+  const ddOpts={...chartOpts('%'),scales:{...chartOpts('%').scales,y:{...chartOpts('%').scales.y,max:0}}};
+  chartDrawdown=new Chart(ctx,{type:'line',data:{labels:analyticsData.dates,datasets:[{
+    label:'Drawdown',data:analyticsData.drawdown,borderColor:'#f43f5e',
+    backgroundColor:(context)=>{
+      const{ctx:c,chartArea}=context.chart;
+      if(!chartArea)return'#f43f5e20';
+      const g=c.createLinearGradient(0,chartArea.top,0,chartArea.bottom);
+      g.addColorStop(0,'#f43f5e30');g.addColorStop(1,'#f43f5e05');return g;
+    },
+    fill:true,borderWidth:1.5,pointRadius:0,tension:0.3
+  }]},options:ddOpts});
+}
+
+// --- BENCHMARK ---
+const BENCH_COLORS=['#f59e0b','#22d3ee','#f43f5e','#a78bfa','#34d399','#fb923c','#38bdf8','#e879f9'];
+
+function getBenchStartIndex() {
+  const sel=document.getElementById('bench-start').value;
+  if(sel==='all')return 0;
+  if(sel==='custom'){
+    const val=document.getElementById('bench-start-custom').value;
+    if(!val)return 0;
+    const idx=historyData.dates.findIndex(d=>d>=val);
+    return idx>=0?idx:0;
+  }
+  const days=parseInt(sel);
+  const cutoff=new Date();cutoff.setDate(cutoff.getDate()-days);
+  const y=cutoff.getFullYear(),m=String(cutoff.getMonth()+1).padStart(2,'0'),d=String(cutoff.getDate()).padStart(2,'0');
+  const cutoffStr=`${y}-${m}-${d}`;
+  const idx=historyData.dates.findIndex(d=>d>=cutoffStr);
+  return idx>=0?idx:0;
+}
+
+function selectBenchmark(ticker,chipEl) {
+  if(activeBenches[ticker]){delete activeBenches[ticker];chipEl.classList.remove('active');updateActiveBenchTags();renderBenchChart();}
+  else{chipEl.classList.add('active');document.getElementById('bench-status').textContent='Ładowanie...';addBenchmark(ticker,BENCH_PRESETS[ticker]||ticker);}
+}
+async function loadBenchmark() {
+  const ticker=document.getElementById('bench-ticker').value.trim().toUpperCase();
+  if(!ticker)return;
+  document.getElementById('bench-ticker').value='';
+  await addBenchmark(ticker,ticker);
+}
+async function addBenchmark(ticker,label) {
+  if(!historyData)return;
+  const end=historyData.dates[historyData.dates.length-1];
+  const startDt=new Date();startDt.setFullYear(startDt.getFullYear()-5);
+  const start=startDt.toISOString().split('T')[0];
+  try{
+    const resp=await fetch(`/api/benchmark?ticker=${encodeURIComponent(ticker)}&start=${start}&end=${end}`);
+    const bench=await resp.json();
+    if(!bench.dates||!bench.dates.length){
+      document.getElementById('bench-status').textContent=`❌ Nie znaleziono: ${ticker}`;
+      const chip=document.getElementById('bchip-'+ticker);if(chip)chip.classList.remove('active');return;
+    }
+    activeBenches[ticker]={label,dates:bench.dates,values:bench.values};
+    document.getElementById('bench-status').textContent='';
+    updateActiveBenchTags();renderBenchChart();
+  }catch(e){document.getElementById('bench-status').textContent='❌ Błąd';}
+}
+function removeBenchmark(ticker) {
+  delete activeBenches[ticker];
+  const chip=document.getElementById('bchip-'+ticker);if(chip)chip.classList.remove('active');
+  updateActiveBenchTags();renderBenchChart();
+}
+function updateActiveBenchTags() {
+  document.getElementById('active-benches').innerHTML=Object.entries(activeBenches).map(([ticker,b])=>
+    `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;
+      font-size:12px;background:#1e2235;border:1px solid #2d3148;color:#94a3b8;">
+      ${b.label}<span onclick="removeBenchmark('${ticker}')" style="cursor:pointer;color:#475569;font-size:14px;line-height:1;">×</span>
+    </span>`
+  ).join('');
+}
+function renderBenchChart() {
+  if(!historyData)return;
+  const sel=document.getElementById('bench-start').value;
+  document.getElementById('bench-start-custom').style.display=sel==='custom'?'inline-block':'none';
+  const startIdx=getBenchStartIndex();
+  const dates=historyData.dates.slice(startIdx);
+  const totalSlice=historyData.total.slice(startIdx);
+  const investedSlice=historyData.invested.slice(startIdx);
+  const twr=[];let prevTotal=null,prevInvested=null,cumReturn=1.0;
+  for(let i=0;i<totalSlice.length;i++){
+    const total=totalSlice[i],invested=investedSlice[i];
+    if(total===0){twr.push(null);prevTotal=null;prevInvested=null;continue;}
+    if(prevTotal===null||prevTotal===0){twr.push(100);prevTotal=total;prevInvested=invested;cumReturn=1.0;continue;}
+    const cf=invested-prevInvested,adj=prevTotal+cf;
+    if(adj>0)cumReturn*=total/adj;
+    twr.push(+(cumReturn*100).toFixed(2));prevTotal=total;prevInvested=invested;
+  }
+  const datasets=[{label:'Mój portfel (TWR)',data:twr,borderColor:'#6366f1',backgroundColor:'transparent',borderWidth:2,pointRadius:0,tension:0.3}];
+  Object.entries(activeBenches).forEach(([ticker,bench],i)=>{
+    const bMap={};bench.dates.forEach((d,j)=>bMap[d]=bench.values[j]);
+    const rawValues=dates.map(d=>bMap[d]??null);
+    const firstValid=rawValues.find(v=>v!==null);if(!firstValid)return;
+    const normalized=rawValues.map(v=>v!==null?+(v/firstValid*100).toFixed(2):null);
+    datasets.push({label:bench.label,data:normalized,borderColor:BENCH_COLORS[i%BENCH_COLORS.length],backgroundColor:'transparent',borderWidth:2,pointRadius:0,tension:0.3});
+  });
+  const ctx=document.getElementById('chart-bench').getContext('2d');
+  if(chartBench)chartBench.destroy();
+  chartBench=new Chart(ctx,{type:'line',data:{labels:dates,datasets},options:chartOpts('%',true)});
+}
+
+// --- TICKER MODAL ---
+async function openTickerModal(ticker) {
+  document.getElementById('ticker-modal-bg').style.display='block';
+  document.getElementById('ticker-modal').style.display='block';
+  document.getElementById('ticker-modal-title').textContent=`${ticker} — historia ceny`;
+  document.getElementById('ticker-tx-list').textContent='Ładowanie...';
+  const resp=await fetch(`/api/ticker/${ticker}?portfolio_id=${PORTFOLIO_ID}`);
+  const data=await resp.json();
+  if(data.error){document.getElementById('ticker-tx-list').textContent='Błąd: '+data.error;return;}
+  const dates=data.prices.map(p=>p.date);
+  const prices=data.prices.map(p=>p.price);
+  const buyPoints=dates.map((d,i)=>{const tx=data.transactions.find(t=>t.date===d&&t.type==='buy');return tx?prices[i]:null;});
+  const sellPoints=dates.map((d,i)=>{const tx=data.transactions.find(t=>t.date===d&&t.type==='sell');return tx?prices[i]:null;});
+  const ctx=document.getElementById('chart-ticker').getContext('2d');
+  if(chartTicker)chartTicker.destroy();
+  chartTicker=new Chart(ctx,{type:'line',data:{labels:dates,datasets:[
+    {label:ticker,data:prices,borderColor:'#6366f1',backgroundColor:'#6366f110',fill:true,borderWidth:2,pointRadius:0,tension:0.3},
+    {label:'Kupno',data:buyPoints,type:'scatter',pointStyle:'triangle',pointRadius:8,pointBackgroundColor:'#34d399',borderColor:'#34d399',showLine:false},
+    {label:'Sprzedaż',data:sellPoints,type:'scatter',pointStyle:'triangle',rotation:180,pointRadius:8,pointBackgroundColor:'#f87171',borderColor:'#f87171',showLine:false}
+  ]},options:{...chartOpts('PLN',true),scales:{
+    x:{type:'time',time:{unit:'month',tooltipFormat:'dd.MM.yyyy'},ticks:{color:'#334155',font:{size:10}},grid:{color:'#1a1d2a'}},
+    y:{ticks:{color:'#334155',font:{size:10}},grid:{color:'#1a1d2a'}}
+  }}});
+  document.getElementById('ticker-tx-list').innerHTML = data.transactions.map(t =>
+  `<div style="display:flex;align-items:center;gap:12px;padding:6px 0;border-bottom:1px solid #1e2235;">
+    <span style="color:${t.type==='buy'?'#34d399':'#f87171'};font-size:13px;width:16px;">
+      ${t.type==='buy'?'▲':'▼'}
+    </span>
+    <span style="color:#64748b;font-size:12px;width:90px;flex-shrink:0;">${t.date}</span>
+    <span style="color:${t.type==='buy'?'#34d399':'#f87171'};font-size:12px;width:60px;flex-shrink:0;">
+      ${t.type==='buy'?'Kupno':'Sprzedaż'}
+    </span>
+    <span style="color:#e2e8f0;font-size:12px;">${parseFloat(t.quantity).toFixed(4)} szt. @ ${parseFloat(t.price).toFixed(2)} PLN</span>
+    <span style="color:#475569;font-size:12px;margin-left:auto;">${(t.quantity*t.price).toFixed(2)} PLN</span>
+  </div>`
+).join('');
+}
+function closeTickerModal() {
+  document.getElementById('ticker-modal-bg').style.display='none';
+  document.getElementById('ticker-modal').style.display='none';
+}
+
+// --- KORELACJA ---
+async function loadCorrelation() {
+  const resp = await fetch(`/api/correlation?portfolio_id=${PORTFOLIO_ID}`);
+  const data = await resp.json();
+  const container = document.getElementById('correlation-container');
+
+  if (!data.tickers || data.tickers.length < 2) {
+    container.innerHTML = '<p style="color:#475569;font-size:12px;">Za mało danych (minimum 2 spółki z historią).</p>';
+    return;
+  }
+
+  const tickers = data.tickers;
+  const matrix = data.matrix;
+
+  // Legenda
+  function corrColor(v, i, j) {
+    if (i === j) return { bg: '#2d3148', text: '#64748b' };
+    const abs = Math.abs(v);
+    if (v >= 0.7)  return { bg: '#f43f5e30', text: '#f87171' };
+    if (v >= 0.4)  return { bg: '#f59e0b25', text: '#fbbf24' };
+    if (v >= 0.1)  return { bg: '#6366f115', text: '#818cf8' };
+    if (v <= -0.4) return { bg: '#6366f130', text: '#818cf8' };
+    if (v <= -0.1) return { bg: '#6366f110', text: '#64748b' };
+    return { bg: 'transparent', text: '#334155' };
+  }
+
+  function corrLabel(v, i, j) {
+    if (i === j) return '—';
+    if (v >= 0.7)  return '🔴 Wysoka';
+    if (v >= 0.4)  return '🟡 Średnia';
+    if (v >= 0.1)  return '⚪ Niska';
+    if (v <= -0.4) return '🔵 Ujemna';
+    return '· brak';
+  }
+
+  // Znajdź pary z wysoką korelacją (ostrzeżenie dywersyfikacji)
+  const highCorr = [];
+  for (let i = 0; i < tickers.length; i++) {
+    for (let j = i + 1; j < tickers.length; j++) {
+      if (matrix[i][j] >= 0.7) {
+        highCorr.push({ a: tickers[i], b: tickers[j], v: matrix[i][j] });
+      }
+    }
+  }
+
+  const size = Math.max(36, Math.min(56, Math.floor(700 / (tickers.length + 1))));
+
+  let html = '';
+
+  // Ostrzeżenia
+  if (highCorr.length) {
+    html += `<div style="padding:10px 14px;background:#f59e0b15;border:1px solid #f59e0b30;
+      border-radius:8px;margin-bottom:16px;font-size:12px;color:#fbbf24;">
+      ⚠ Wysoka korelacja (słaba dywersyfikacja): 
+      ${highCorr.map(p => `<strong>${p.a} ↔ ${p.b}</strong> (${p.v.toFixed(2)})`).join(' · ')}
+    </div>`;
+  } else {
+    html += `<div style="padding:10px 14px;background:#10b98115;border:1px solid #10b98130;
+      border-radius:8px;margin-bottom:16px;font-size:12px;color:#34d399;">
+      ✓ Dobra dywersyfikacja — brak par spółek z wysoką korelacją (≥0.7)
+    </div>`;
+  }
+
+  // Tabela
+  html += `<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;">`;
+
+  // Nagłówek
+  html += `<tr><td style="width:${size}px;"></td>`;
+  tickers.forEach(t => {
+    const short = t.length > 7 ? t.substring(0, 6) + '…' : t;
+    html += `<td style="width:${size}px;height:50px;text-align:center;vertical-align:bottom;
+      padding-bottom:4px;font-size:10px;color:#475569;white-space:nowrap;"
+      title="${t}">${short}</td>`;
+  });
+  html += '</tr>';
+
+  // Wiersze
+  matrix.forEach((row, i) => {
+    const short = tickers[i].length > 7 ? tickers[i].substring(0, 6) + '…' : tickers[i];
+    html += `<tr>
+      <td style="text-align:right;padding-right:6px;font-size:10px;color:#475569;
+        white-space:nowrap;vertical-align:middle;" title="${tickers[i]}">${short}</td>`;
+    row.forEach((val, j) => {
+      const { bg, text } = corrColor(val, i, j);
+      const label = corrLabel(val, i, j);
+      const display = i === j ? '—' : val.toFixed(2);
+      html += `<td title="${tickers[i]} ↔ ${tickers[j]}: ${label} (${val.toFixed(3)})"
+        style="width:${size}px;height:${size}px;text-align:center;vertical-align:middle;
+          background:${bg};border-radius:4px;font-size:10px;color:${text};
+          cursor:default;font-weight:${Math.abs(val) > 0.4 ? 600 : 400};">
+        ${display}
+      </td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += `</table></div>`;
+
+  // Legenda
+  html += `<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;font-size:11px;color:#475569;">
+    <span>🔴 Wysoka (≥0.7) — podobne ruchy, słaba dywersyfikacja</span>
+    <span>🟡 Średnia (0.4–0.7)</span>
+    <span>⚪ Niska (0.1–0.4) — dobra dywersyfikacja</span>
+    <span>🔵 Ujemna (≤-0.4) — ruchy w przeciwnych kierunkach, idealna dywersyfikacja</span>
+  </div>`;
+
+  container.innerHTML = html;
+}
+
+// --- REBALANCING ---
+let rebalTargets = {};
+let rebalData = null;
+
+async function loadRebalancing() {
+  const resp = await fetch(`/api/rebalancing?portfolio_id=${PORTFOLIO_ID}`);
+  rebalData = await resp.json();
+  renderRebalancing();
+  buildRebalInputs();
+}
+
+function renderRebalancing() {
+  const container = document.getElementById('rebalancing-container');
+  if (!rebalData || !rebalData.suggestions || rebalData.suggestions.length === 0) {
+    container.innerHTML = '<p style="color:#475569;font-size:12px;">Ustaw docelowe wagi aby zobaczyć sugestie.</p>';
+    return;
+  }
+
+  const totalValue = rebalData.total_value;
+  container.innerHTML = rebalData.suggestions.map(s => {
+    const actionColor = s.action === 'kup' ? '#34d399' : s.action === 'sprzedaj' ? '#f87171' : '#475569';
+    const actionText = s.action === 'kup' ? '▲ Dokup' : s.action === 'sprzedaj' ? '▼ Sprzedaj' : '✓ OK';
+    const barActual = s.actual_pct;
+    const barTarget = s.target_pct;
+
+    return `<div style="margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:13px;color:#e2e8f0;font-weight:500;">${s.category}</span>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span style="font-size:12px;color:#64748b;">Cel: <strong style="color:#94a3b8;">${s.target_pct}%</strong></span>
+          <span style="font-size:12px;color:#64748b;">Teraz: <strong style="color:#e2e8f0;">${s.actual_pct}%</strong></span>
+          <span style="font-size:12px;font-weight:500;color:${actionColor};min-width:100px;text-align:right;">
+            ${actionText} ${Math.abs(s.diff_value) > 50 ? Math.abs(s.diff_value).toFixed(0)+' PLN' : ''}
+          </span>
+        </div>
+      </div>
+      <div style="position:relative;height:8px;background:#1e2235;border-radius:4px;overflow:visible;">
+        <div style="position:absolute;left:0;top:0;height:100%;width:${Math.min(barActual,100)}%;
+          background:${actionColor};border-radius:4px;opacity:0.7;transition:width .3s;"></div>
+        <div style="position:absolute;top:-3px;height:14px;width:2px;background:#fff;border-radius:1px;
+          left:${Math.min(barTarget,100)}%;transform:translateX(-50%);" title="Cel: ${barTarget}%"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function buildRebalInputs() {
+  const CATEGORIES = ['Akcje GPW', 'ETF', 'Obligacje', 'Surowce', 'Krypto', 'Inne'];
+  const container = document.getElementById('rebal-inputs');
+  container.innerHTML = CATEGORIES.map(cat => {
+    const current = rebalData?.current?.[cat] || 0;
+    const target = rebalTargets[cat] || 0;
+    return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+      <span style="font-size:12px;color:#94a3b8;width:100px;">${cat}</span>
+      <span style="font-size:11px;color:#475569;width:60px;">Teraz: ${current.toFixed(1)}%</span>
+      <input type="number" min="0" max="100" step="5" value="${target}"
+        id="rebal-input-${cat.replace(/\s/g,'_')}"
+        oninput="updateRebalSum()"
+        style="width:70px;background:#1a1d27;border:1px solid #2d3148;border-radius:6px;
+               padding:4px 8px;color:#e2e8f0;font-size:12px;outline:none;">
+      <span style="font-size:12px;color:#475569;">%</span>
+    </div>`;
+  }).join('');
+  updateRebalSum();
+}
+
+function updateRebalSum() {
+  const CATEGORIES = ['Akcje GPW', 'ETF', 'Obligacje', 'Surowce', 'Krypto', 'Inne'];
+  let sum = 0;
+  CATEGORIES.forEach(cat => {
+    const el = document.getElementById('rebal-input-'+cat.replace(/\s/g,'_'));
+    if (el) sum += parseFloat(el.value) || 0;
+  });
+  const ind = document.getElementById('rebal-sum-indicator');
+  ind.textContent = `Suma: ${sum}%`;
+  ind.style.color = Math.abs(sum - 100) < 1 ? '#34d399' : sum > 100 ? '#f87171' : '#f59e0b';
+}
+
+function toggleRebalancingEdit() {
+  const ed = document.getElementById('rebal-editor');
+  const btn = document.getElementById('rebal-edit-btn');
+  if (ed.style.display === 'none') {
+    ed.style.display = 'block'; btn.textContent = '✕ Zamknij';
+  } else {
+    ed.style.display = 'none'; btn.textContent = '✏️ Edytuj cele';
+  }
+}
+
+async function saveRebalancing() {
+  const CATEGORIES = ['Akcje GPW', 'ETF', 'Obligacje', 'Surowce', 'Krypto', 'Inne'];
+  const targets = {};
+  CATEGORIES.forEach(cat => {
+    const el = document.getElementById('rebal-input-'+cat.replace(/\s/g,'_'));
+    if (el) targets[cat] = parseFloat(el.value) || 0;
+  });
+  rebalTargets = targets;
+  await fetch(`/api/rebalancing?portfolio_id=${PORTFOLIO_ID}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({targets})
+  });
+  await loadRebalancing();
+  toggleRebalancingEdit();
+}
+
+// --- MONTE CARLO ---
+let chartMonteCarlo = null;
+
+async function loadMonteCarlo() {
+  const years = document.getElementById('mc-years').value;
+  const monthly = document.getElementById('mc-monthly').value;
+  const resp = await fetch(`/api/montecarlo?portfolio_id=${PORTFOLIO_ID}&years=${years}&monthly=${monthly}`);
+  const data = await resp.json();
+  if (!data.dates) return;
+
+  document.getElementById('mc-stats').style.display = 'grid';
+  document.getElementById('mc-median').textContent = data.mean_final.toFixed(0) + ' PLN';
+  document.getElementById('mc-prob-profit').textContent = data.prob_profit + '%';
+  document.getElementById('mc-prob-double').textContent = data.prob_double + '%';
+
+  const MC_COLORS = {
+    '90': { border: '#34d399', bg: '#34d39910' },
+    '75': { border: '#6366f1', bg: '#6366f115' },
+    '50': { border: '#ffffff', bg: '#ffffff08' },
+    '25': { border: '#f59e0b', bg: '#f59e0b10' },
+    '10': { border: '#f87171', bg: '#f8717110' },
+  };
+  const MC_LABELS = {
+    '90': 'Optymistyczny (90%)',
+    '75': 'Dobry (75%)',
+    '50': 'Mediana (50%)',
+    '25': 'Słaby (25%)',
+    '10': 'Pesymistyczny (10%)',
+  };
+
+  const datasets = Object.entries(data.percentiles).reverse().map(([p, vals]) => ({
+    label: MC_LABELS[p],
+    data: vals,
+    borderColor: MC_COLORS[p].border,
+    backgroundColor: MC_COLORS[p].bg,
+    fill: p === '90' ? '+1' : false,
+    borderWidth: p === '50' ? 2 : 1,
+    borderDash: p === '50' ? [] : [4, 3],
+    pointRadius: 0,
+    tension: 0.4,
+  }));
+
+  // Linia obecnej wartości
+  datasets.push({
+    label: 'Dziś',
+    data: Array(data.dates.length).fill(data.current_value),
+    borderColor: '#475569',
+    borderDash: [2, 4],
+    borderWidth: 1,
+    pointRadius: 0,
+  });
+
+  const ctx = document.getElementById('chart-montecarlo').getContext('2d');
+  if (chartMonteCarlo) chartMonteCarlo.destroy();
+  chartMonteCarlo = new Chart(ctx, {
+    type: 'line',
+    data: { labels: data.dates, datasets },
+    options: { ...chartOpts('PLN', true) }
+  });
+}
+
+// --- DYWIDENDY ---
+async function loadDividends() {
+  const resp = await fetch(`/api/dividends?portfolio_id=${PORTFOLIO_ID}`);
+  const data = await resp.json();
+
+  document.getElementById('div-total').textContent = (data.total_received || 0).toFixed(2) + ' PLN';
+  document.getElementById('div-annual').textContent = (data.annual_forecast || 0).toFixed(2) + ' PLN';
+  document.getElementById('div-monthly').textContent = (data.monthly_forecast || 0).toFixed(2) + ' PLN';
+
+  // Heatmapa
+  renderDividendHeatmap(data.heatmap || {});
+
+  // Lista
+  const list = document.getElementById('div-list');
+  if (!data.dividends || !data.dividends.length) {
+    list.innerHTML = '<p style="color:#475569;">Brak dywidend w historii.</p>';
+    return;
+  }
+  list.innerHTML = `<table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="font-size:11px;color:#475569;border-bottom:1px solid #1e2235;">
+      <th style="text-align:left;padding:6px 8px;">Data</th>
+      <th style="text-align:left;padding:6px 8px;">Ticker</th>
+      <th style="text-align:right;padding:6px 8px;">Kwota</th>
+    </tr></thead>
+    <tbody>${data.dividends.map(d => `
+      <tr style="border-bottom:1px solid #1a1d2a;">
+        <td style="padding:6px 8px;color:#64748b;font-size:12px;">${d.date}</td>
+        <td style="padding:6px 8px;color:#e2e8f0;font-size:12px;font-weight:500;">${d.ticker || '—'}</td>
+        <td style="padding:6px 8px;text-align:right;color:#34d399;font-size:12px;">+${d.amount.toFixed(2)} PLN</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+function renderDividendHeatmap(heatmap) {
+  const container = document.getElementById('div-heatmap');
+  if (!Object.keys(heatmap).length) { container.innerHTML = ''; return; }
+
+  const months = Object.keys(heatmap).sort();
+  const maxVal = Math.max(...Object.values(heatmap));
+
+  const html = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+    ${months.map(m => {
+      const val = heatmap[m];
+      const intensity = maxVal > 0 ? val / maxVal : 0;
+      const bg = `rgba(52,211,153,${0.1 + intensity * 0.8})`;
+      return `<div title="${m}: ${val.toFixed(2)} PLN"
+        style="padding:4px 8px;background:${bg};border-radius:4px;font-size:11px;color:#e2e8f0;cursor:default;">
+        ${m.substring(5)} ${val.toFixed(0)}
+      </div>`;
+    }).join('')}
+  </div>
+  <div style="font-size:11px;color:#475569;">Dywidendy per miesiąc (ciemniejszy = więcej)</div>`;
+  container.innerHTML = html;
+}
+
+function toggleDivForm() {
+  const f = document.getElementById('div-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveDividend() {
+  const ticker = document.getElementById('div-ticker').value.trim().toUpperCase();
+  const amount = parseFloat(document.getElementById('div-amount').value);
+  const date = document.getElementById('div-date').value;
+  if (!ticker || !amount || !date) return alert('Wypełnij wszystkie pola');
+  await fetch(`/api/dividends?portfolio_id=${PORTFOLIO_ID}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ticker, amount, date})
+  });
+  toggleDivForm();
+  loadDividends();
+}
+
+// --- CELE ---
+let goalMode = 'target';
+let goalChart = null;
+let goalChart2 = null;
+const CURRENT_VALUE = {{ total_value }};
+
+function setGoalMode(mode) {
+  goalMode = mode;
+  document.getElementById('goal-fields-target').style.display = mode === 'target' ? 'block' : 'none';
+  document.getElementById('goal-fields-monthly').style.display = mode === 'monthly' ? 'block' : 'none';
+  document.getElementById('goal-mode-target').style.background = mode === 'target' ? '#6366f1' : '#1e2235';
+  document.getElementById('goal-mode-target').style.color = mode === 'target' ? '#fff' : '#94a3b8';
+  document.getElementById('goal-mode-target').style.border = mode === 'target' ? 'none' : '1px solid #2d3148';
+  document.getElementById('goal-mode-monthly').style.background = mode === 'monthly' ? '#6366f1' : '#1e2235';
+  document.getElementById('goal-mode-monthly').style.color = mode === 'monthly' ? '#fff' : '#94a3b8';
+  document.getElementById('goal-mode-monthly').style.border = mode === 'monthly' ? 'none' : '1px solid #2d3148';
+}
+
+function calcGoal() {
+  const target = parseFloat(document.getElementById('goal-target').value);
+  const deadline = document.getElementById('goal-deadline').value;
+  const rate = parseFloat(document.getElementById('goal-rate').value) / 100;
+  if (!target || !deadline || !rate) return;
+
+  const months = Math.max(1, Math.round((new Date(deadline) - new Date()) / (1000*60*60*24*30)));
+  const monthlyRate = rate / 12;
+  const currentFV = CURRENT_VALUE * Math.pow(1 + monthlyRate, months);
+  const shortfall = Math.max(0, target - currentFV);
+  const monthlyNeeded = monthlyRate > 0
+    ? shortfall * monthlyRate / (Math.pow(1 + monthlyRate, months) - 1)
+    : shortfall / months;
+
+  const totalContributions = monthlyNeeded * months;
+  const gain = target - CURRENT_VALUE - totalContributions;
+
+  document.getElementById('goal-result-target').style.display = 'block';
+  document.getElementById('goal-calc-monthly').textContent = monthlyNeeded.toFixed(0) + ' PLN';
+  document.getElementById('goal-calc-contributions').textContent = totalContributions.toFixed(0) + ' PLN';
+  document.getElementById('goal-calc-gain').textContent = '+' + Math.max(0, gain).toFixed(0) + ' PLN';
+
+  // Wykres
+  const labels = [], invested = [], total = [];
+  let portfolioVal = CURRENT_VALUE, totalInvested = CURRENT_VALUE;
+  for (let m = 0; m <= months; m++) {
+    labels.push(m);
+    invested.push(Math.round(totalInvested));
+    total.push(Math.round(portfolioVal));
+    portfolioVal = portfolioVal * (1 + monthlyRate) + monthlyNeeded;
+    totalInvested += monthlyNeeded;
+  }
+
+  const ctx = document.getElementById('goal-chart').getContext('2d');
+  if (goalChart) goalChart.destroy();
+  goalChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Wartość portfela', data: total, borderColor: '#6366f1', backgroundColor: '#6366f115', fill: true, borderWidth: 2, pointRadius: 0, tension: 0.4 },
+      { label: 'Wpłaty', data: invested, borderColor: '#f59e0b', borderDash: [4,3], backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.4 },
+      { label: 'Cel', data: Array(labels.length).fill(target), borderColor: '#34d399', borderDash: [2,4], borderWidth: 1, pointRadius: 0 }
+    ]},
+    options: { responsive: true, animation: false,
+      plugins: { legend: { labels: { color: '#64748b', font: { size: 10 }, boxWidth: 8 } }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw.toLocaleString()} PLN` } } },
+      scales: { x: { display: false }, y: { ticks: { color: '#334155', font: { size: 10 }, callback: v => v.toLocaleString() }, grid: { color: '#1a1d2a' } } }
+    }
+  });
+}
+
+function calcGoalFromMonthly() {
+  const monthly = parseFloat(document.getElementById('goal-monthly-input').value);
+  const years = parseFloat(document.getElementById('goal-years-input').value);
+  const rate = parseFloat(document.getElementById('goal-rate2').value) / 100;
+  if (!monthly || !years || !rate) return;
+
+  const months = Math.round(years * 12);
+  const monthlyRate = rate / 12;
+  const fvPortfolio = CURRENT_VALUE * Math.pow(1 + monthlyRate, months);
+  const fvContributions = monthly * (Math.pow(1 + monthlyRate, months) - 1) / monthlyRate;
+  const totalFV = fvPortfolio + fvContributions;
+  const totalContributions = monthly * months;
+  const gain = totalFV - CURRENT_VALUE - totalContributions;
+
+  document.getElementById('goal-result-monthly').style.display = 'block';
+  document.getElementById('goal-calc-total').textContent = totalFV.toFixed(0) + ' PLN';
+  document.getElementById('goal-calc-contributions2').textContent = totalContributions.toFixed(0) + ' PLN';
+  document.getElementById('goal-calc-gain2').textContent = '+' + gain.toFixed(0) + ' PLN';
+
+  const labels = [], invested = [], total = [];
+  let portfolioVal = CURRENT_VALUE, totalInvested = CURRENT_VALUE;
+  for (let m = 0; m <= months; m++) {
+    labels.push(m);
+    invested.push(Math.round(totalInvested));
+    total.push(Math.round(portfolioVal));
+    portfolioVal = portfolioVal * (1 + monthlyRate) + monthly;
+    totalInvested += monthly;
+  }
+
+  const ctx = document.getElementById('goal-chart2').getContext('2d');
+  if (goalChart2) goalChart2.destroy();
+  goalChart2 = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Wartość portfela', data: total, borderColor: '#6366f1', backgroundColor: '#6366f115', fill: true, borderWidth: 2, pointRadius: 0, tension: 0.4 },
+      { label: 'Wpłaty', data: invested, borderColor: '#f59e0b', borderDash: [4,3], backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.4 },
+    ]},
+    options: { responsive: true, animation: false,
+      plugins: { legend: { labels: { color: '#64748b', font: { size: 10 }, boxWidth: 8 } }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw.toLocaleString()} PLN` } } },
+      scales: { x: { display: false }, y: { ticks: { color: '#334155', font: { size: 10 }, callback: v => v.toLocaleString() }, grid: { color: '#1a1d2a' } } }
+    }
+  });
+}
+
+function toggleGoalForm() {
+  const f = document.getElementById('goal-form');
+  const isHidden = f.style.display === 'none';
+  f.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) setGoalMode('target');
+}
+
+async function saveGoal() {
+  const name = document.getElementById('goal-name').value.trim();
+  if (!name) return alert('Podaj nazwę celu');
+
+  let target, deadline, monthly;
+  if (goalMode === 'target') {
+    target = parseFloat(document.getElementById('goal-target').value);
+    deadline = document.getElementById('goal-deadline').value;
+    monthly = parseFloat(document.getElementById('goal-calc-monthly')?.textContent) || 0;
+    if (!target || !deadline) return alert('Wypełnij kwotę i termin');
+  } else {
+    monthly = parseFloat(document.getElementById('goal-monthly-input').value);
+    const years = parseFloat(document.getElementById('goal-years-input').value);
+    target = parseFloat(document.getElementById('goal-calc-total')?.textContent?.replace(/\s/g,'')) || 0;
+    const d = new Date(); d.setFullYear(d.getFullYear() + (years || 10));
+    deadline = d.toISOString().split('T')[0];
+    if (!monthly || !years) return alert('Wypełnij wpłatę i liczbę lat');
+  }
+
+  await fetch(`/api/goals?portfolio_id=${PORTFOLIO_ID}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ name, target, deadline, monthly_investment: monthly || 0 })
+  });
+  toggleGoalForm();
+  loadGoals();
+}
+
+async function loadGoals() {
+  const resp = await fetch(`/api/goals?portfolio_id=${PORTFOLIO_ID}`);
+  const goals = await resp.json();
+  const container = document.getElementById('goals-list');
+  if (!goals.length) {
+    container.innerHTML = '<p style="color:#475569;font-size:12px;">Brak celów. Dodaj pierwszy cel.</p>';
+    return;
+  }
+  container.innerHTML = goals.map(g => {
+    const color = g.will_achieve ? '#34d399' : '#f87171';
+    const statusText = g.will_achieve ? '✓ Na dobrej drodze' : '⚠ Potrzeba więcej wpłat';
+    const barW = Math.min(g.progress_pct, 100);
+    return `<div style="margin-bottom:16px;padding:16px;background:#0f1117;border-radius:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:14px;font-weight:600;color:#fff;">${g.name}</span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:12px;color:${color};">${statusText}</span>
+          <button onclick="deleteGoal('${g.id}')"
+            style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;">×</button>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:12px;color:#64748b;">
+        <span>Cel: <strong style="color:#e2e8f0;">${Number(g.target).toLocaleString()} PLN</strong></span>
+        <span>Termin: <strong style="color:#e2e8f0;">${g.deadline}</strong> · ${g.years_left} lat</span>
+      </div>
+      <div style="position:relative;height:8px;background:#1e2235;border-radius:4px;margin-bottom:10px;overflow:hidden;">
+        <div style="height:100%;width:${barW}%;background:${color};border-radius:4px;opacity:0.8;transition:width .3s;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px;color:#64748b;">
+        <div>Postęp: <strong style="color:#e2e8f0;">${g.progress_pct}%</strong></div>
+        <div>Prognoza: <strong style="color:#e2e8f0;">${Number(g.projected_value).toLocaleString()} PLN</strong></div>
+        <div>Wpłata/mies: <strong style="color:${color};">${g.required_monthly > 0 ? Number(g.required_monthly.toFixed(0)).toLocaleString()+' PLN' : '—'}</strong></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function deleteGoal(id) {
+  if (!confirm('Usunąć cel?')) return;
+  await fetch(`/api/goals/${id}?portfolio_id=${PORTFOLIO_ID}`, {method:'DELETE'});
+  loadGoals();
+}
+
+function toggleGoalForm() {
+  const f = document.getElementById('goal-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveGoal() {
+  const name = document.getElementById('goal-name').value.trim();
+  const target = parseFloat(document.getElementById('goal-target').value);
+  const deadline = document.getElementById('goal-deadline').value;
+  const monthly = parseFloat(document.getElementById('goal-monthly').value) || 0;
+  if (!name || !target || !deadline) return alert('Wypełnij wszystkie pola');
+  await fetch(`/api/goals?portfolio_id=${PORTFOLIO_ID}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, target, deadline, monthly_investment: monthly})
+  });
+  toggleGoalForm();
+  loadGoals();
+}
+
+async function deleteGoal(id) {
+  if (!confirm('Usunąć cel?')) return;
+  await fetch(`/api/goals/${id}?portfolio_id=${PORTFOLIO_ID}`, {method:'DELETE'});
+  loadGoals();
+}
+
+// --- ALERTY ---
+async function loadAlerts() {
+  const resp = await fetch(`/api/alerts?portfolio_id=${PORTFOLIO_ID}`);
+  const data = await resp.json();
+
+  // Wyzwolone
+  const triggered = document.getElementById('alerts-triggered');
+  if (data.triggered && data.triggered.length) {
+    triggered.innerHTML = data.triggered.map(a =>
+      `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f4375015;
+          border:1px solid #f4375030;border-radius:8px;margin-bottom:8px;">
+        <span style="font-size:16px;">🔔</span>
+        <span style="font-size:13px;color:#f87171;font-weight:500;">${a.name}</span>
+        <span style="font-size:12px;color:#94a3b8;margin-left:auto;">
+          Aktualna wartość: ${a.current_value}
+        </span>
+      </div>`
+    ).join('');
+  } else {
+    triggered.innerHTML = '';
+  }
+
+  // Lista
+  const list = document.getElementById('alerts-list');
+  if (!data.alerts || !data.alerts.length) {
+    list.innerHTML = '<p style="color:#475569;font-size:12px;">Brak alertów.</p>';
+    return;
+  }
+  list.innerHTML = `<table style="width:100%;border-collapse:collapse;">
+    <thead><tr style="font-size:11px;color:#475569;border-bottom:1px solid #1e2235;">
+      <th style="text-align:left;padding:6px 8px;">Alert</th>
+      <th style="text-align:left;padding:6px 8px;">Warunek</th>
+      <th style="text-align:left;padding:6px 8px;">Status</th>
+      <th style="text-align:center;padding:6px 8px;">Usuń</th>
+    </tr></thead>
+    <tbody>${data.alerts.map(a => {
+      const statusColor = a.triggered ? '#f59e0b' : '#34d399';
+      const statusText = a.triggered ? '⚡ Wyzwolony' : '● Aktywny';
+      const typeLabel = a.type === 'price' ? `${a.ticker}` : a.type === 'portfolio_value' ? 'Portfel' : 'Zysk %';
+      return `<tr style="border-bottom:1px solid #1a1d2a;">
+        <td style="padding:8px;color:#e2e8f0;font-size:12px;font-weight:500;">${a.name || typeLabel}</td>
+        <td style="padding:8px;color:#64748b;font-size:12px;">
+          ${a.condition === 'below' ? 'Poniżej' : 'Powyżej'} ${a.value}
+        </td>
+        <td style="padding:8px;font-size:12px;color:${statusColor};">${statusText}</td>
+        <td style="padding:8px;text-align:center;">
+          <button onclick="deleteAlert('${a.id}')"
+            style="background:none;border:none;color:#475569;cursor:pointer;font-size:16px;">×</button>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table>`;
+}
+
+function toggleAlertForm() {
+  const f = document.getElementById('alert-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+function updateAlertForm() {
+  const type = document.getElementById('alert-type').value;
+  document.getElementById('alert-ticker-wrap').style.display = type === 'price' ? 'block' : 'none';
+  const label = document.getElementById('alert-value-label');
+  label.textContent = type === 'portfolio_pnl_pct' ? 'Wartość (%)' : 'Wartość (PLN)';
+}
+
+async function saveAlert() {
+  const type = document.getElementById('alert-type').value;
+  const ticker = type === 'price' ? document.getElementById('alert-ticker').value : null;
+  const condition = document.getElementById('alert-condition').value;
+  const value = parseFloat(document.getElementById('alert-value').value);
+  if (!value) return alert('Podaj wartość alertu');
+  const name = `${ticker || (type === 'portfolio_value' ? 'Portfel' : 'Zysk')} ${condition === 'below' ? '<' : '>'} ${value}`;
+  await fetch(`/api/alerts?portfolio_id=${PORTFOLIO_ID}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({type, ticker, condition, value, name})
+  });
+  toggleAlertForm();
+  loadAlerts();
+}
+
+async function deleteAlert(id) {
+  await fetch(`/api/alerts/${id}?portfolio_id=${PORTFOLIO_ID}`, {method:'DELETE'});
+  loadAlerts();
+}
+
+// --- INIT ---
+initChips();
+loadHistory().then(() => {
+  loadAnalytics();
+  loadCorrelation();
+  loadRebalancing();
+  loadMonteCarlo();
+  loadDividends();
+  loadGoals();
+  loadAlerts();
+});
+</script>
+</body>
+</html>

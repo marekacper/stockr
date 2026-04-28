@@ -1,0 +1,44 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# Data — personal financial data, never commit
+data/portfolios/*.csv
+data/portfolios.json
+data/prices_cache.json
+data/imports/
+data/imports_meta.json
+data/dividends.json
+data/goals.json
+data/alerts.json
+data/rebalancing_targets.json
+
+# Keep the data directory structure
+!data/.gitkeep
+!data/portfolios/.gitkeep
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains
+.idea/
+
+# Logs
+*.loginvesting_panel/

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tabela — Mój portfel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0f1117; color: #e2e8f0; font-family: system-ui, sans-serif; }
+    .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px; }
+    select, input[type=text] {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 8px;
+      padding: 5px 10px; color: #e2e8f0; font-size: 12px; outline: none;
+    }
+    select:focus, input[type=text]:focus { border-color: #6366f1; }
+    table { border-collapse: collapse; width: 100%; }
+    th { white-space: nowrap; }
+    td { white-space: nowrap; }
+    .nav-link { color: #64748b; text-decoration: none; font-size: 13px; transition: color .15s; }
+    .nav-link:hover, .nav-link.active { color: #e2e8f0; }
+    .sort-btn { cursor: pointer; user-select: none; }
+    .sort-btn:hover { color: #a5b4fc; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<!-- Nav -->
+<nav style="background:#13151f;border-bottom:1px solid #1e2235;" class="px-6 py-3 flex items-center gap-6 sticky top-0 z-10">
+  <span style="color:#a5b4fc;font-weight:600;font-size:15px;">📊 Portfel</span>
+  <a href="/dashboard?portfolio_id={{ portfolio_id }}" class="nav-link">Dashboard</a>
+  <a href="/table?portfolio_id={{ portfolio_id }}" class="nav-link" style="color:#e2e8f0;">Tabela</a>
+  <a href="/add?portfolio_id={{ portfolio_id }}" class="nav-link">+ Transakcja</a>
+  <a href="/upload" class="nav-link">Import</a>
+
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <span style="font-size:11px;color:#475569;">Portfel:</span>
+    <select onchange="window.location.href='/table?portfolio_id='+this.value"
+      style="background:#1a1d27;border:1px solid #2d3148;border-radius:8px;padding:5px 10px;color:#e2e8f0;font-size:12px;max-width:180px;">
+      {% for p in portfolios %}
+      <option value="{{ p.id }}" {% if p.id == portfolio_id %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</nav>
+
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+
+  <!-- Karty podsumowania -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" id="summary-cards">
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">WARTOŚĆ PORTFELA</div>
+      <div id="s-value" style="font-size:20px;font-weight:600;color:#fff;">—</div>
+    </div>
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">ZAINWESTOWANO</div>
+      <div id="s-cost" style="font-size:20px;font-weight:600;color:#fff;">—</div>
+    </div>
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">ZYSK / STRATA</div>
+      <div id="s-pnl" style="font-size:20px;font-weight:600;">—</div>
+    </div>
+    <div class="card p-4">
+      <div style="color:#64748b;font-size:11px;margin-bottom:4px;">STOPA ZWROTU</div>
+      <div id="s-pct" style="font-size:20px;font-weight:600;">—</div>
+    </div>
+  </div>
+
+  <!-- Tabela spółek -->
+  <div class="card p-5 mb-5">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <h2 style="font-size:13px;font-weight:600;color:#fff;">Wszystkie spółki</h2>
+      <div class="flex items-center gap-2">
+        <input type="text" id="table-search" placeholder="🔍 Szukaj tickera..." oninput="renderTable()" style="width:160px;">
+        <span style="font-size:11px;color:#475569;">* zmiana dzienna</span>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table>
+        <thead>
+          <tr style="border-bottom:1px solid #1e2235;font-size:11px;color:#475569;text-transform:uppercase;">
+            <th class="sort-btn" style="text-align:left;padding:8px 12px;" onclick="sortTable('ticker')">Walor <span id="sort-ticker"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('daily_change')">Zmiana dz. <span id="sort-daily_change"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('quantity')">Liczba jedn. <span id="sort-quantity"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('avg_price')">Śr. cena zakupu <span id="sort-avg_price"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('current_price')">Cena aktualna <span id="sort-current_price"></span></th>
+            <th style="text-align:right;padding:8px 12px;">Data inwest.</th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('days')">Okres [dni] <span id="sort-days"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('value')">Wartość PLN <span id="sort-value"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('share')">Udział <span id="sort-share"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('pnl_pct')">Stopa zwrotu <span id="sort-pnl_pct"></span></th>
+            <th class="sort-btn" style="text-align:right;padding:8px 12px;" onclick="sortTable('pnl')">Zysk PLN <span id="sort-pnl"></span></th>
+          </tr>
+        </thead>
+        <tbody id="stocks-table">
+          <tr><td colspan="11" style="text-align:center;padding:32px;color:#475569;">Ładowanie...</td></tr>
+        </tbody>
+        <tfoot id="stocks-footer"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Historia transakcji -->
+  <div class="card p-5">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Historia transakcji</h2>
+    <div class="overflow-x-auto">
+      <table>
+        <thead>
+          <tr style="border-bottom:1px solid #1e2235;font-size:11px;color:#475569;text-transform:uppercase;">
+            <th style="text-align:left;padding:8px 12px;">Data</th>
+            <th style="text-align:left;padding:8px 12px;">Ticker</th>
+            <th style="text-align:left;padding:8px 12px;">Typ</th>
+            <th style="text-align:right;padding:8px 12px;">Ilość</th>
+            <th style="text-align:right;padding:8px 12px;">Cena</th>
+            <th style="text-align:right;padding:8px 12px;">Prowizja</th>
+            <th style="text-align:right;padding:8px 12px;">Wartość</th>
+          </tr>
+        </thead>
+        <tbody id="tx-table">
+          <tr><td colspan="7" style="text-align:center;padding:32px;color:#475569;">Ładowanie...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let stocksData = [];
+let sortKey = 'value';
+let sortDir = -1;
+
+const PORTFOLIO_ID = "{{ portfolio_id }}";
+
+async function init() {
+  const [dailyResp, txResp] = await Promise.all([
+    fetch(`/api/daily?portfolio_id=${PORTFOLIO_ID}`),
+    fetch(`/api/transactions?portfolio_id=${PORTFOLIO_ID}`)
+  ]);
+  const daily = await dailyResp.json();
+  const transactions = await txResp.json();
+
+  // Pierwsza data kupna per ticker
+  const firstBuy = {};
+  transactions.forEach(tx => {
+    if (tx.type === 'buy') {
+      if (!firstBuy[tx.ticker] || tx.date < firstBuy[tx.ticker]) {
+        firstBuy[tx.ticker] = tx.date;
+      }
+    }
+  });
+
+  const today = new Date();
+  const totalValue = daily.reduce((s, r) => s + (r.value || 0), 0);
+
+  stocksData = daily.map(r => {
+    const date = firstBuy[r.ticker] || null;
+    const days = date ? Math.floor((today - new Date(date)) / 86400000) : null;
+    const pnl_pct = r.avg_price > 0 && r.current_price
+      ? (r.current_price - r.avg_price) / r.avg_price * 100
+      : null;
+    const share = r.value && totalValue > 0 ? r.value / totalValue * 100 : null;
+    return { ...r, date, days, pnl_pct, share };
+  });
+
+  // Podsumowanie
+  const totalCost = stocksData.reduce((s, r) => s + (r.cost || 0), 0);
+  const totalPnl = totalValue - totalCost;
+  const totalPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0;
+  const pnlColor = totalPnl >= 0 ? '#34d399' : '#f87171';
+
+  document.getElementById('s-value').textContent = totalValue.toFixed(2) + ' PLN';
+  document.getElementById('s-cost').textContent = totalCost.toFixed(2) + ' PLN';
+  document.getElementById('s-pnl').style.color = pnlColor;
+  document.getElementById('s-pnl').textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' PLN';
+  document.getElementById('s-pct').style.color = pnlColor;
+  document.getElementById('s-pct').textContent = (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '%';
+
+  renderTable();
+  renderTransactions(transactions);
+}
+
+function sortTable(key) {
+  if (sortKey === key) sortDir *= -1;
+  else { sortKey = key; sortDir = -1; }
+  // Aktualizuj strzałki
+  document.querySelectorAll('[id^="sort-"]').forEach(el => el.textContent = '');
+  const el = document.getElementById('sort-' + key);
+  if (el) el.textContent = sortDir === -1 ? ' ↓' : ' ↑';
+  renderTable();
+}
+
+function renderTable() {
+  const search = (document.getElementById('table-search')?.value || '').toLowerCase();
+  let data = stocksData.filter(r => r.ticker.toLowerCase().includes(search));
+
+  data.sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * sortDir;
+    return (av - bv) * sortDir;
+  });
+
+  const tbody = document.getElementById('stocks-table');
+  const tfoot = document.getElementById('stocks-footer');
+
+  tbody.innerHTML = data.map(r => {
+    const dailyColor = r.daily_change > 0 ? '#34d399' : r.daily_change < 0 ? '#f87171' : '#64748b';
+    const pnlColor = r.pnl_pct > 0 ? '#34d399' : r.pnl_pct < 0 ? '#f87171' : '#64748b';
+    const arrow = v => v > 0 ? '▲ ' : v < 0 ? '▼ ' : '';
+    const fmt = (v, dec = 2) => v != null ? v.toFixed(dec) : '—';
+
+    return `<tr style="border-bottom:1px solid #1a1d2a;transition:background .1s;"
+                onmouseover="this.style.background='#1e2235'"
+                onmouseout="this.style.background='transparent'">
+      <td style="padding:9px 12px;font-weight:500;color:#e2e8f0;">${r.ticker}</td>
+      <td style="padding:9px 12px;text-align:right;color:${dailyColor};font-size:13px;">
+        ${r.daily_change != null ? `${arrow(r.daily_change)}${Math.abs(r.daily_change).toFixed(2)}%` : '—'}
+      </td>
+      <td style="padding:9px 12px;text-align:right;color:#94a3b8;font-size:13px;">${fmt(r.quantity, 4)}</td>
+      <td style="padding:9px 12px;text-align:right;color:#94a3b8;font-size:13px;">${fmt(r.avg_price)}</td>
+      <td style="padding:9px 12px;text-align:right;color:#e2e8f0;font-size:13px;">${fmt(r.current_price)}</td>
+      <td style="padding:9px 12px;text-align:right;color:#64748b;font-size:13px;">${r.date || '—'}</td>
+      <td style="padding:9px 12px;text-align:right;color:#64748b;font-size:13px;">${r.days ?? '—'}</td>
+      <td style="padding:9px 12px;text-align:right;color:#e2e8f0;font-size:13px;">${fmt(r.value)}</td>
+      <td style="padding:9px 12px;text-align:right;color:#64748b;font-size:13px;">${r.share != null ? r.share.toFixed(2) + '%' : '—'}</td>
+      <td style="padding:9px 12px;text-align:right;font-weight:500;color:${pnlColor};font-size:13px;">
+        ${r.pnl_pct != null ? `${r.pnl_pct >= 0 ? '+' : ''}${r.pnl_pct.toFixed(2)}%` : '—'}
+      </td>
+      <td style="padding:9px 12px;text-align:right;font-weight:500;color:${pnlColor};font-size:13px;">
+        ${r.pnl != null ? `${r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(2)}` : '—'}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const totalValue = data.reduce((s, r) => s + (r.value || 0), 0);
+  const totalPnl = data.reduce((s, r) => s + (r.pnl || 0), 0);
+  const totalCost = data.reduce((s, r) => s + (r.cost || 0), 0);
+  const totalPct = totalCost > 0 ? totalPnl / totalCost * 100 : 0;
+  const footColor = totalPct >= 0 ? '#34d399' : '#f87171';
+
+  tfoot.innerHTML = `<tr style="border-top:1px solid #2d3148;font-weight:600;color:#fff;font-size:13px;">
+    <td style="padding:10px 12px;">Razem</td>
+    <td></td><td></td><td></td><td></td><td></td><td></td>
+    <td style="padding:10px 12px;text-align:right;">${totalValue.toFixed(2)}</td>
+    <td style="padding:10px 12px;text-align:right;color:#64748b;">100%</td>
+    <td style="padding:10px 12px;text-align:right;color:${footColor};">${totalPct >= 0 ? '+' : ''}${totalPct.toFixed(2)}%</td>
+    <td style="padding:10px 12px;text-align:right;color:${footColor};">${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}</td>
+  </tr>`;
+}
+
+function renderTransactions(transactions) {
+  const tbody = document.getElementById('tx-table');
+  tbody.innerHTML = transactions.map(tx => {
+    const isBuy = tx.type === 'buy';
+    const value = (parseFloat(tx.quantity) * parseFloat(tx.price)).toFixed(2);
+    return `<tr style="border-bottom:1px solid #1a1d2a;transition:background .1s;"
+                onmouseover="this.style.background='#1e2235'"
+                onmouseout="this.style.background='transparent'">
+      <td style="padding:9px 12px;color:#64748b;font-size:13px;">${tx.date}</td>
+      <td style="padding:9px 12px;font-weight:500;color:#e2e8f0;font-size:13px;">${tx.ticker}</td>
+      <td style="padding:9px 12px;font-size:13px;">
+        <span style="padding:2px 10px;border-radius:99px;font-size:11px;font-weight:500;
+          background:${isBuy ? '#10b98120' : '#f4375020'};
+          color:${isBuy ? '#34d399' : '#f87171'};">
+          ${isBuy ? 'Kupno' : 'Sprzedaż'}
+        </span>
+      </td>
+      <td style="padding:9px 12px;text-align:right;color:#94a3b8;font-size:13px;">${parseFloat(tx.quantity).toFixed(4)}</td>
+      <td style="padding:9px 12px;text-align:right;color:#e2e8f0;font-size:13px;">${parseFloat(tx.price).toFixed(2)}</td>
+      <td style="padding:9px 12px;text-align:right;color:#64748b;font-size:13px;">${parseFloat(tx.commission).toFixed(2)}</td>
+      <td style="padding:9px 12px;text-align:right;color:#e2e8f0;font-size:13px;">${value}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Ustaw domyślną strzałkę sortowania
+document.getElementById('sort-value').textContent = ' ↓';
+init();
+</script>
+</body>
+</html>
