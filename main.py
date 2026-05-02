@@ -4,7 +4,6 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from typing import List
 import tempfile, os, shutil, json
-import yfinance as yf
 import uvicorn
 from datetime import datetime
 import numpy as np
@@ -23,6 +22,20 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
+# --- Pomocnicze ---
+
+def _portfolio_context(portfolio_id: str):
+    """Zwraca portfolio, ceny i podstawowe obliczenia. Wywołuj raz per request."""
+    portfolio = get_portfolio_holdings(portfolio_id)
+    tickers = list(portfolio.keys())
+    prices = get_prices(tickers) if tickers else {}
+    total_value = sum(prices[t] * portfolio[t]["quantity"] for t in tickers if prices.get(t))
+    total_cost = sum(portfolio[t]["cost"] for t in tickers)
+    return portfolio, tickers, prices, total_value, total_cost
+
+
+# --- Strony ---
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return RedirectResponse("/dashboard", status_code=302)
@@ -32,12 +45,7 @@ async def index(request: Request):
 async def dashboard(request: Request, portfolio_id: str = "default"):
     ensure_setup()
     portfolios = load_portfolios()
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
-
-    total_value = sum(prices[t] * portfolio[t]["quantity"] for t in tickers if prices.get(t))
-    total_cost = sum(portfolio[t]["cost"] for t in tickers)
+    portfolio, tickers, prices, total_value, total_cost = _portfolio_context(portfolio_id)
     total_pnl = total_value - total_cost
     current = next((p for p in portfolios if p["id"] == portfolio_id), portfolios[0])
 
@@ -61,11 +69,9 @@ async def dashboard(request: Request, portfolio_id: str = "default"):
 @app.get("/table", response_class=HTMLResponse)
 async def table(request: Request, portfolio_id: str = "default"):
     ensure_setup()
-    transactions = get_transactions_for(portfolio_id)
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
     portfolios = load_portfolios()
+    portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
+    transactions = get_transactions_for(portfolio_id)
     current = next((p for p in portfolios if p["id"] == portfolio_id), portfolios[0])
 
     return templates.TemplateResponse(
@@ -181,11 +187,26 @@ async def upload_files(
     with open(IMPORTS_META, "w") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
+    # Wyczyść cache historii po imporcie
+    _clear_history_cache(portfolio_id)
+
     return templates.TemplateResponse(
         request=request,
         name="upload.html",
         context={"result": result, "portfolios": load_portfolios()}
     )
+
+
+def _clear_history_cache(portfolio_id: str):
+    """Usuwa cache historii po dodaniu nowych transakcji."""
+    import glob
+    cache_dir = "data/history_cache"
+    if os.path.exists(cache_dir):
+        for f in glob.glob(os.path.join(cache_dir, "*.json")):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
 
 
 # --- API ---
@@ -202,24 +223,13 @@ async def api_benchmark(ticker: str, start: str, end: str):
 
 @app.get("/api/daily")
 async def api_daily(portfolio_id: str = "default"):
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
-
+    """Zwraca dzienny stan portfela. Używa cache cen."""
+    portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
     result = []
     for ticker, pos in portfolio.items():
         current = prices.get(ticker)
         value = round(current * pos["quantity"], 2) if current else None
         pnl = round(value - pos["cost"], 2) if value else None
-        daily_change = None
-        try:
-            info = yf.Ticker(to_yf_ticker(ticker)).fast_info
-            prev = info.previous_close
-            last = info.last_price
-            if prev and last:
-                daily_change = round((last - prev) / prev * 100, 2)
-        except Exception:
-            pass
         result.append({
             "ticker": ticker,
             "quantity": pos["quantity"],
@@ -228,7 +238,7 @@ async def api_daily(portfolio_id: str = "default"):
             "value": value,
             "cost": pos["cost"],
             "pnl": pnl,
-            "daily_change": daily_change,
+            "daily_change": None,  # obliczane osobno jeśli potrzebne
         })
     result.sort(key=lambda x: x["value"] or 0, reverse=True)
     return result
@@ -290,10 +300,9 @@ async def delete_import(import_id: str):
 @app.get("/api/categories")
 async def api_categories(portfolio_id: str = "default"):
     from services.categories import get_categories_summary
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
+    portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
     return get_categories_summary(portfolio, prices)
+
 
 @app.get("/api/analytics")
 async def api_analytics(portfolio_id: str = "default"):
@@ -315,9 +324,8 @@ async def api_analytics(portfolio_id: str = "default"):
 
 @app.get("/api/ticker/{ticker}")
 async def api_ticker_history(ticker: str, portfolio_id: str = "default"):
-    """Historia ceny tickera z momentami zakupu."""
     import yfinance as yf
-    from services.portfolios import get_transactions_for
+    from datetime import timedelta
 
     transactions = get_transactions_for(portfolio_id)
     ticker_txs = [t for t in transactions if t["ticker"] == ticker]
@@ -325,9 +333,6 @@ async def api_ticker_history(ticker: str, portfolio_id: str = "default"):
     if not ticker_txs:
         return {"error": "Brak transakcji dla tego tickera"}
 
-    # Pobierz historię ceny
-    from services.prices import to_yf_ticker
-    from datetime import datetime, timedelta
     start = min(t["date"] for t in ticker_txs)
     start_dt = datetime.strptime(start, "%Y-%m-%d") - timedelta(days=7)
 
@@ -365,6 +370,7 @@ async def api_ticker_history(ticker: str, portfolio_id: str = "default"):
         ]
     }
 
+
 @app.get("/api/correlation")
 async def api_correlation(portfolio_id: str = "default"):
     from services.analytics import calculate_correlation
@@ -377,9 +383,7 @@ async def api_correlation(portfolio_id: str = "default"):
 @app.get("/api/rebalancing")
 async def api_rebalancing(portfolio_id: str = "default"):
     from services.rebalancing import load_targets, calculate_rebalancing
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
+    portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
     targets = load_targets(portfolio_id)
     return calculate_rebalancing(portfolio, prices, targets)
 
@@ -404,14 +408,13 @@ async def api_montecarlo(
         return {}
     return monte_carlo_simulation(data["total"], data["invested"], years, 1000, monthly)
 
-# --- DYWIDENDY ---
+
 @app.get("/api/dividends")
 async def api_dividends(portfolio_id: str = "default"):
     from services.dividends import get_dividend_summary
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
+    portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
     return get_dividend_summary(portfolio_id, portfolio, prices)
+
 
 @app.post("/api/dividends")
 async def api_add_dividend(portfolio_id: str, request: Request):
@@ -421,25 +424,19 @@ async def api_add_dividend(portfolio_id: str, request: Request):
     return {"ok": True}
 
 
-# --- CELE ---
 @app.get("/api/goals")
 async def api_goals(portfolio_id: str = "default"):
     from services.goals import load_goals, calculate_goal_progress
     from services.analytics import calculate_risk_metrics
-    from services.history import build_portfolio_history
     goals = load_goals(portfolio_id)
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
-    total_value = sum(prices[t] * portfolio[t]["quantity"] for t in tickers if prices.get(t))
+    portfolio, tickers, prices, total_value, _ = _portfolio_context(portfolio_id)
     hist = build_portfolio_history(portfolio_id)
-    metrics = calculate_risk_metrics(hist.get("total", []), hist.get("invested", []), hist.get("dates", [])) if hist else {}
+    metrics = calculate_risk_metrics(
+        hist.get("total", []), hist.get("invested", []), hist.get("dates", [])
+    ) if hist else {}
     annual_return = metrics.get("annual_return", 7.0)
-    result = []
-    for goal in goals:
-        progress = calculate_goal_progress(goal, total_value, annual_return)
-        result.append({**goal, **progress})
-    return result
+    return [{**goal, **calculate_goal_progress(goal, total_value, annual_return)} for goal in goals]
+
 
 @app.post("/api/goals")
 async def api_add_goal(portfolio_id: str, request: Request):
@@ -457,28 +454,24 @@ async def api_add_goal(portfolio_id: str, request: Request):
     save_goals(portfolio_id, goals)
     return goal
 
+
 @app.delete("/api/goals/{goal_id}")
 async def api_delete_goal(portfolio_id: str, goal_id: str):
     from services.goals import load_goals, save_goals
-    goals = load_goals(portfolio_id)
-    goals = [g for g in goals if g["id"] != goal_id]
+    goals = [g for g in load_goals(portfolio_id) if g["id"] != goal_id]
     save_goals(portfolio_id, goals)
     return {"ok": True}
 
 
-# --- ALERTY ---
 @app.get("/api/alerts")
 async def api_alerts(portfolio_id: str = "default"):
     from services.alerts import load_alerts, check_alerts
-    portfolio = get_portfolio_holdings(portfolio_id)
-    tickers = list(portfolio.keys())
-    prices = get_prices(tickers) if tickers else {}
-    total_value = sum(prices[t] * portfolio[t]["quantity"] for t in tickers if prices.get(t))
-    total_cost = sum(portfolio[t]["cost"] for t in tickers)
+    portfolio, tickers, prices, total_value, total_cost = _portfolio_context(portfolio_id)
     total_pnl_pct = (total_value - total_cost) / total_cost * 100 if total_cost > 0 else 0
     triggered = check_alerts(portfolio_id, portfolio, prices, total_value, total_pnl_pct)
     alerts = load_alerts(portfolio_id)
     return {"alerts": alerts, "triggered": triggered}
+
 
 @app.post("/api/alerts")
 async def api_add_alert(request: Request, portfolio_id: str = "default"):
@@ -494,11 +487,97 @@ async def api_add_alert(request: Request, portfolio_id: str = "default"):
     )
     return alert
 
+
 @app.delete("/api/alerts/{alert_id}")
 async def api_delete_alert(alert_id: str, portfolio_id: str = "default"):
     from services.alerts import delete_alert
     delete_alert(portfolio_id, alert_id)
     return {"ok": True}
+
+@app.get("/api/dashboard_data")
+async def api_dashboard_data(portfolio_id: str = "default"):
+    """Jeden endpoint zwracający wszystkie dane dashboardu równolegle."""
+    from concurrent.futures import ThreadPoolExecutor
+    from services.analytics import calculate_drawdown, calculate_risk_metrics, calculate_correlation, monte_carlo_simulation
+    from services.categories import get_categories_summary
+    from services.rebalancing import load_targets, calculate_rebalancing
+    from services.dividends import get_dividend_summary
+    from services.goals import load_goals, calculate_goal_progress
+
+    portfolio, tickers, prices, total_value, total_cost = _portfolio_context(portfolio_id)
+    hist = build_portfolio_history(portfolio_id)
+
+    def get_analytics():
+        if not hist or not hist.get("total"):
+            return {}
+        dd = calculate_drawdown(hist["total"])
+        metrics = calculate_risk_metrics(hist["total"], hist["invested"], hist["dates"])
+        return {
+            "dates": hist["dates"],
+            "drawdown": dd["drawdown"],
+            "max_drawdown": dd["max_drawdown"],
+            "peak_idx": dd["peak_idx"],
+            "trough_idx": dd["trough_idx"],
+            "metrics": metrics,
+        }
+
+    def get_correlation():
+        if not hist:
+            return {}
+        return calculate_correlation(hist)
+
+    def get_montecarlo():
+        if not hist or not hist.get("total"):
+            return {}
+        return monte_carlo_simulation(hist["total"], hist["invested"], 5, 1000, 0)
+
+    def get_categories():
+        return get_categories_summary(portfolio, prices)
+
+    def get_rebalancing():
+        targets = load_targets(portfolio_id)
+        return calculate_rebalancing(portfolio, prices, targets)
+
+    def get_dividends():
+        return get_dividend_summary(portfolio_id, portfolio, prices)
+
+    def get_goals():
+        goals = load_goals(portfolio_id)
+        metrics = calculate_risk_metrics(
+            hist.get("total", []), hist.get("invested", []), hist.get("dates", [])
+        ) if hist else {}
+        annual_return = metrics.get("annual_return", 7.0)
+        return [{**g, **calculate_goal_progress(g, total_value, annual_return)} for g in goals]
+
+    def get_alerts():
+        from services.alerts import load_alerts, check_alerts
+        total_pnl_pct = (total_value - total_cost) / total_cost * 100 if total_cost > 0 else 0
+        triggered = check_alerts(portfolio_id, portfolio, prices, total_value, total_pnl_pct)
+        alerts = load_alerts(portfolio_id)
+        return {"alerts": alerts, "triggered": triggered}
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        f_analytics    = executor.submit(get_analytics)
+        f_correlation  = executor.submit(get_correlation)
+        f_montecarlo   = executor.submit(get_montecarlo)
+        f_categories   = executor.submit(get_categories)
+        f_rebalancing  = executor.submit(get_rebalancing)
+        f_dividends    = executor.submit(get_dividends)
+        f_goals        = executor.submit(get_goals)
+        f_alerts       = executor.submit(get_alerts)
+
+        return {
+            "analytics":   f_analytics.result(),
+            "correlation": f_correlation.result(),
+            "montecarlo":  f_montecarlo.result(),
+            "categories":  f_categories.result(),
+            "rebalancing": f_rebalancing.result(),
+            "dividends":   f_dividends.result(),
+            "goals":       f_goals.result(),
+            "alerts":      f_alerts.result(),
+        }
+
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True)
