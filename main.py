@@ -198,7 +198,6 @@ async def upload_files(
 
 
 def _clear_history_cache(portfolio_id: str):
-    """Usuwa cache historii po dodaniu nowych transakcji."""
     import glob
     cache_dir = "data/history_cache"
     if os.path.exists(cache_dir):
@@ -207,6 +206,9 @@ def _clear_history_cache(portfolio_id: str):
                 os.remove(f)
             except Exception:
                 pass
+    # Wyczyść też cache dywidend
+    from services.dividends import clear_div_cache
+    clear_div_cache()
 
 
 # --- API ---
