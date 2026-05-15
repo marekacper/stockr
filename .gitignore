@@ -24,6 +24,10 @@ data/goals.json
 data/alerts.json
 data/rebalancing_targets.json
 
+# Cache — auto-generated, never commit
+data/history_cache/
+data/div_cache/
+
 # Keep the data directory structure
 !data/.gitkeep
 !data/portfolios/.gitkeep
@@ -41,4 +45,10 @@ data/rebalancing_targets.json
 .idea/
 
 # Logs
-*.loginvesting_panel/
+*.log
+
+# Docker
+investing_panel/
+
+# SQLite database
+data/stockr.db

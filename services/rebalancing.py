@@ -1,37 +1,51 @@
-import json
-import os
+"""
+rebalancing.py — cele rebalancingu przechowywane w SQLite.
+Tabela: rebalancing_targets (portfolio_id, category, target_pct)
+"""
 
-TARGETS_FILE = "data/rebalancing_targets.json"
+from services.portfolios import get_db, ensure_setup
+
+
+def _ensure_table():
+    ensure_setup()
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS rebalancing_targets (
+                portfolio_id TEXT NOT NULL,
+                category     TEXT NOT NULL,
+                target_pct   REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (portfolio_id, category)
+            )
+        """)
 
 
 def load_targets(portfolio_id: str) -> dict:
-    if not os.path.exists(TARGETS_FILE):
-        return {}
-    with open(TARGETS_FILE) as f:
-        all_targets = json.load(f)
-    return all_targets.get(portfolio_id, {})
+    _ensure_table()
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT category, target_pct FROM rebalancing_targets WHERE portfolio_id = ?",
+            (portfolio_id,)
+        ).fetchall()
+    return {r["category"]: r["target_pct"] for r in rows}
 
 
 def save_targets(portfolio_id: str, targets: dict):
-    all_targets = {}
-    if os.path.exists(TARGETS_FILE):
-        with open(TARGETS_FILE) as f:
-            all_targets = json.load(f)
-    all_targets[portfolio_id] = targets
-    with open(TARGETS_FILE, "w") as f:
-        json.dump(all_targets, f, ensure_ascii=False, indent=2)
+    _ensure_table()
+    with get_db() as conn:
+        conn.execute("DELETE FROM rebalancing_targets WHERE portfolio_id = ?", (portfolio_id,))
+        for category, pct in targets.items():
+            conn.execute(
+                "INSERT INTO rebalancing_targets (portfolio_id, category, target_pct) VALUES (?,?,?)",
+                (portfolio_id, category, float(pct))
+            )
 
 
 def calculate_rebalancing(portfolio: dict, prices: dict, targets: dict) -> dict:
-    """
-    Liczy odchylenia od docelowych wag i co kupić/sprzedać.
-    targets: {"Akcje GPW": 40, "ETF": 40, "Obligacje": 20}  (sumy do 100)
-    """
     from services.categories import get_category
 
-    # Aktualne wartości per kategoria
     current = {}
     total_value = 0.0
+
     for ticker, pos in portfolio.items():
         price = prices.get(ticker)
         if not price:
@@ -44,13 +58,10 @@ def calculate_rebalancing(portfolio: dict, prices: dict, targets: dict) -> dict:
     if total_value == 0:
         return {}
 
-    # Aktualne wagi %
     current_pct = {cat: round(val / total_value * 100, 2) for cat, val in current.items()}
 
-    # Odchylenia i sugestie
     suggestions = []
     all_cats = set(list(targets.keys()) + list(current.keys()))
-
     for cat in all_cats:
         target_pct = targets.get(cat, 0)
         actual_pct = current_pct.get(cat, 0)
@@ -58,7 +69,6 @@ def calculate_rebalancing(portfolio: dict, prices: dict, targets: dict) -> dict:
         target_value = total_value * target_pct / 100
         diff_pct = round(actual_pct - target_pct, 2)
         diff_value = round(actual_value - target_value, 2)
-
         suggestions.append({
             "category": cat,
             "target_pct": target_pct,

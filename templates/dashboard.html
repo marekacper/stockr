@@ -84,6 +84,15 @@
   </div>
 
   <div class="card p-5 mb-4">
+    <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Analiza sektorowa</h2>
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div><canvas id="chart-sectors" height="200"></canvas></div>
+      <div id="sector-bars" style="display:flex;flex-direction:column;justify-content:center;gap:8px;"></div>
+    </div>
+    <div id="sector-ticker-table" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="card p-5 mb-4">
     <h2 style="font-size:13px;font-weight:600;color:#fff;margin-bottom:16px;">Wskaźniki ryzyka</h2>
     <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
       <div class="metric-card"><div class="metric-tooltip">Annualizowana stopa zwrotu TWR — oczyszczona z efektu wpłat. Pokazuje czysty wynik inwestycyjny, jakby portfel rósł przez pełny rok.</div><div style="font-size:10px;color:#475569;margin-bottom:4px;">ROCZNA STOPA ZWROTU</div><div id="m-annual" style="font-size:18px;font-weight:600;">—</div></div>
@@ -163,8 +172,23 @@
         <div style="display:flex;align-items:flex-end;"><button onclick="saveDividend()" style="width:100%;background:#6366f1;color:#fff;border:none;border-radius:8px;padding:7px;font-size:12px;cursor:pointer;">Zapisz</button></div>
       </div>
     </div>
-    <div id="div-heatmap" style="margin-bottom:16px;"></div>
-    <div id="div-list" style="font-size:12px;color:#475569;">Ładowanie...</div>
+    <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid #1e2235;">
+      <button id="div-tab-history" onclick="switchDivTab('history')" style="padding:6px 14px;font-size:12px;border:none;border-bottom:2px solid #6366f1;background:transparent;color:#a5b4fc;cursor:pointer;font-weight:500;">Historia</button>
+      <button id="div-tab-yearly" onclick="switchDivTab('yearly')" style="padding:6px 14px;font-size:12px;border:none;border-bottom:2px solid transparent;background:transparent;color:#64748b;cursor:pointer;">Rok do roku</button>
+      <button id="div-tab-tracker" onclick="switchDivTab('tracker')" style="padding:6px 14px;font-size:12px;border:none;border-bottom:2px solid transparent;background:transparent;color:#64748b;cursor:pointer;">Tracker</button>
+    </div>
+    <div id="div-panel-history">
+      <div id="div-heatmap" style="margin-bottom:16px;"></div>
+      <div id="div-list" style="font-size:12px;color:#475569;">Ładowanie...</div>
+    </div>
+    <div id="div-panel-yearly" style="display:none;">
+      <canvas id="chart-div-yearly" height="60"></canvas>
+      <div id="div-yearly-table" style="margin-top:16px;"></div>
+    </div>
+    <div id="div-panel-tracker" style="display:none;">
+      <p style="font-size:11px;color:#475569;margin-bottom:12px;">Szacowane następne wypłaty dywidend na podstawie historycznej częstotliwości.</p>
+      <div id="div-tracker-list">Ładowanie...</div>
+    </div>
   </div>
 
   <div class="card p-5 mb-4">
@@ -300,16 +324,16 @@ const BENCH_PRESETS = {'SPY':'S&P 500','QQQ':'NASDAQ 100','VUAA.DE':'ETF S&P500'
 let historyData = null;
 let activeChips = new Set(TICKERS);
 let activeBenches = {};
-let chartValue=null, chartPnl=null, chartPie=null, chartInvested=null, chartBench=null, chartDrawdown=null, chartTicker=null, chartMonteCarlo=null;
-let goalChart=null, goalChart2=null;
-let goalMode = 'target';
-let rebalTargets = {}, rebalData = null;
+let chartValue=null,chartPnl=null,chartPie=null,chartInvested=null,chartBench=null,chartDrawdown=null,chartTicker=null,chartMonteCarlo=null,chartSectors=null,chartDivYearly=null;
+let goalChart=null,goalChart2=null;
+let goalMode='target';
+let rebalTargets={},rebalData=null;
 
 // --- PORTFOLIO ---
-function switchPortfolio(id) { window.location.href=`/dashboard?portfolio_id=${id}`; }
-function showNewPortfolioModal() { document.getElementById('modal-bg').style.display='block'; document.getElementById('modal').style.display='block'; setTimeout(()=>document.getElementById('new-portfolio-name').focus(),50); }
-function hideModal() { document.getElementById('modal-bg').style.display='none'; document.getElementById('modal').style.display='none'; }
-async function createPortfolio() {
+function switchPortfolio(id){window.location.href=`/dashboard?portfolio_id=${id}`;}
+function showNewPortfolioModal(){document.getElementById('modal-bg').style.display='block';document.getElementById('modal').style.display='block';setTimeout(()=>document.getElementById('new-portfolio-name').focus(),50);}
+function hideModal(){document.getElementById('modal-bg').style.display='none';document.getElementById('modal').style.display='none';}
+async function createPortfolio(){
   const name=document.getElementById('new-portfolio-name').value.trim();
   if(!name){document.getElementById('new-portfolio-name').focus();return;}
   const desc=document.getElementById('new-portfolio-desc').value.trim();
@@ -317,27 +341,25 @@ async function createPortfolio() {
   const data=await resp.json();
   window.location.href=`/dashboard?portfolio_id=${data.id}`;
 }
-async function confirmDeletePortfolio() {
+async function confirmDeletePortfolio(){
   const sel=document.getElementById('portfolio-select');
   const name=sel.options[sel.selectedIndex].text;
   if(!confirm(`Usunąć portfel "${name}"?\n\nTA OPERACJA JEST NIEODWRACALNA.`))return;
   const resp=await fetch(`/api/portfolios/${PORTFOLIO_ID}`,{method:'DELETE'});
   const data=await resp.json();
-  if(data.ok) window.location.href='/dashboard?portfolio_id=default';
+  if(data.ok)window.location.href='/dashboard?portfolio_id=default';
   else alert('Błąd: '+data.error);
 }
 
 // --- CHIPS ---
-function initChips() {
+function initChips(){
   const container=document.getElementById('ticker-chips');
   const all=document.createElement('div');
   all.className='chip active';all.id='chip-all';all.textContent='Wszystkie';all.onclick=toggleAll;
   container.appendChild(all);
   TICKERS.forEach((t,i)=>{
-    const wrap=document.createElement('div');
-    wrap.style.cssText='display:inline-flex;align-items:center;gap:2px;';
-    const chip=document.createElement('div');
-    chip.className='chip active';chip.id='chip-'+t;
+    const wrap=document.createElement('div');wrap.style.cssText='display:inline-flex;align-items:center;gap:2px;';
+    const chip=document.createElement('div');chip.className='chip active';chip.id='chip-'+t;
     chip.innerHTML=`<span style="width:7px;height:7px;border-radius:50%;background:${COLORS[i%COLORS.length]};flex-shrink:0"></span>${t}`;
     chip.onclick=()=>toggleChip(t);
     const btn=document.createElement('span');
@@ -350,12 +372,12 @@ function initChips() {
     wrap.appendChild(chip);wrap.appendChild(btn);container.appendChild(wrap);
   });
 }
-function toggleAll() {
+function toggleAll(){
   if(activeChips.size===TICKERS.length){activeChips.clear();document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));}
   else{activeChips=new Set(TICKERS);document.querySelectorAll('.chip').forEach(c=>c.classList.add('active'));}
   updateValueChart();
 }
-function toggleChip(ticker) {
+function toggleChip(ticker){
   if(activeChips.has(ticker)){activeChips.delete(ticker);document.getElementById('chip-'+ticker).classList.remove('active');}
   else{activeChips.add(ticker);document.getElementById('chip-'+ticker).classList.add('active');}
   document.getElementById('chip-all').classList.toggle('active',activeChips.size===TICKERS.length);
@@ -363,35 +385,30 @@ function toggleChip(ticker) {
 }
 
 // --- HELPERS ---
-function sliceByRange(days) {
+function sliceByRange(days){
   if(!historyData)return{dates:[],start:0};
   if(days>=9999)return{dates:historyData.dates,start:0};
   const cutoff=new Date();cutoff.setDate(cutoff.getDate()-days);
   const idx=historyData.dates.findIndex(d=>new Date(d)>=cutoff);
   return{dates:historyData.dates.slice(idx>=0?idx:0),start:idx>=0?idx:0};
 }
-function chartOpts(unit='PLN',spanGaps=false) {
-  return {
-    responsive:true,spanGaps,animation:false,
-    interaction:{mode:'index',intersect:false},
+function chartOpts(unit='PLN',spanGaps=false){
+  return{responsive:true,spanGaps,animation:false,interaction:{mode:'index',intersect:false},
     plugins:{legend:{labels:{color:'#64748b',font:{size:11},boxWidth:10,padding:12}},
       tooltip:{backgroundColor:'#1e2235',borderColor:'#2d3148',borderWidth:1,titleColor:'#94a3b8',bodyColor:'#e2e8f0',padding:10,
         callbacks:{label:ctx=>` ${ctx.dataset.label}: ${(ctx.raw??0).toFixed(2)} ${unit}`}}},
-    scales:{
-      x:{type:'time',time:{unit:'month',tooltipFormat:'dd.MM.yyyy'},ticks:{color:'#334155',font:{size:10},maxTicksLimit:12},grid:{color:'#1a1d2a'}},
-      y:{ticks:{color:'#334155',font:{size:10}},grid:{color:'#1a1d2a'}}
-    }
-  };
+    scales:{x:{type:'time',time:{unit:'month',tooltipFormat:'dd.MM.yyyy'},ticks:{color:'#334155',font:{size:10},maxTicksLimit:12},grid:{color:'#1a1d2a'}},
+      y:{ticks:{color:'#334155',font:{size:10}},grid:{color:'#1a1d2a'}}}};
 }
 const setEl=(id,val,color)=>{const el=document.getElementById(id);if(el){el.textContent=val;if(color)el.style.color=color;}};
 
 // --- HISTORY ---
-async function loadHistory() {
+async function loadHistory(){
   const resp=await fetch(`/api/history?portfolio_id=${PORTFOLIO_ID}`);
   historyData=await resp.json();
   updateValueChart();updatePnlChart();updateInvestedChart();
 }
-function updateValueChart() {
+function updateValueChart(){
   if(!historyData)return;
   const days=parseInt(document.getElementById('range1').value);
   const{dates,start}=sliceByRange(days);
@@ -407,7 +424,7 @@ function updateValueChart() {
   if(chartValue)chartValue.destroy();
   chartValue=new Chart(ctx,{type:'line',data:{labels:dates,datasets},options:chartOpts('PLN')});
 }
-function updatePnlChart() {
+function updatePnlChart(){
   if(!historyData)return;
   const pnl=historyData.total.map((v,i)=>+(v-historyData.invested[i]).toFixed(2));
   const ctx=document.getElementById('chart-pnl').getContext('2d');
@@ -416,7 +433,7 @@ function updatePnlChart() {
     backgroundColor:(context)=>{const{ctx:c,chartArea}=context.chart;if(!chartArea)return'#10b98120';const g=c.createLinearGradient(0,chartArea.top,0,chartArea.bottom);g.addColorStop(0,'#10b98130');g.addColorStop(1,'#10b98105');return g;},
     fill:true,borderWidth:2,pointRadius:0,tension:0.3}]},options:chartOpts('PLN')});
 }
-function updateInvestedChart() {
+function updateInvestedChart(){
   if(!historyData)return;
   const ctx=document.getElementById('chart-invested').getContext('2d');
   if(chartInvested)chartInvested.destroy();
@@ -427,11 +444,11 @@ function updateInvestedChart() {
 }
 
 // --- BAR CHART ---
-function buildBarChart(cats) {
+function buildBarChart(cats){
   const container=document.getElementById('bar-chart-container');
   if(!container)return;
   const catColorMap={};cats.forEach(c=>catColorMap[c.category]=c.color);
-  function getCategory(ticker) {
+  function getCategory(ticker){
     const t=ticker.toUpperCase();
     const manual={'VUAA.DE':'ETF','V80A.DE':'ETF','SXRV.DE':'ETF','IUSQ.DE':'ETF','CNDX.DE':'ETF','CNDX.UK':'ETF','EIMI.UK':'ETF','MSF.DE':'ETF','AMD.DE':'ETF','NVD.DE':'ETF','CNYA.DE':'ETF','ABEA.DE':'ETF','ETFBS80TR.PL':'ETF','TOS0428':'Obligacje','TOS0528':'Obligacje','TOS0628':'Obligacje','TOS0728':'Obligacje','TOS0928':'Obligacje','EDO1135':'Obligacje'};
     if(manual[t])return manual[t];
@@ -459,8 +476,50 @@ function buildBarChart(cats) {
   }).join('');
 }
 
-// --- RENDER FUNCTIONS ---
-function _renderAnalytics(data) {
+// --- SEKTORY ---
+function _renderSectors(data){
+  if(!data||!data.sectors||!data.sectors.length)return;
+  const sectors=data.sectors;
+  const byTicker=data.by_ticker||[];
+  const ctx=document.getElementById('chart-sectors').getContext('2d');
+  if(chartSectors)chartSectors.destroy();
+  chartSectors=new Chart(ctx,{type:'doughnut',data:{labels:sectors.map(s=>s.sector),datasets:[{data:sectors.map(s=>s.value),backgroundColor:sectors.map(s=>s.color),borderWidth:0,hoverOffset:6}]},
+    options:{animation:false,plugins:{legend:{position:'right',labels:{color:'#64748b',font:{size:11},boxWidth:10,padding:10}},
+      tooltip:{callbacks:{label:ctx=>{const total=ctx.dataset.data.reduce((a,b)=>a+b,0);return` ${ctx.label}: ${ctx.raw.toFixed(2)} PLN (${(ctx.raw/total*100).toFixed(1)}%)`;}}}}
+    ,cutout:'62%'}});
+  const maxVal=sectors[0].value;
+  document.getElementById('sector-bars').innerHTML=sectors.map(s=>`
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:110px;text-align:right;font-size:12px;color:#e2e8f0;flex-shrink:0;">${s.sector}</div>
+      <div style="flex:1;position:relative;height:20px;background:#1e2235;border-radius:4px;overflow:hidden;">
+        <div style="position:absolute;left:0;top:0;height:100%;width:${(s.value/maxVal*100).toFixed(1)}%;background:${s.color};border-radius:4px;opacity:0.85;"></div>
+        <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:11px;color:#fff;font-weight:500;z-index:1;">${s.value.toFixed(0)} PLN</span>
+      </div>
+      <div style="width:42px;text-align:right;font-size:12px;color:#64748b;flex-shrink:0;">${s.share}%</div>
+    </div>`).join('');
+  const grouped={};byTicker.forEach(t=>{if(!grouped[t.sector])grouped[t.sector]=[];grouped[t.sector].push(t);});
+  const totalVal=data.total_value;
+  document.getElementById('sector-ticker-table').innerHTML=sectors.map(s=>{
+    const items=grouped[s.sector]||[];
+    return`<div style="margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${s.color};flex-shrink:0;"></div>
+        <span style="font-size:12px;font-weight:600;color:#e2e8f0;">${s.sector}</span>
+        <span style="font-size:11px;color:#475569;margin-left:auto;">${s.share}% · ${s.value.toFixed(0)} PLN</span>
+      </div>
+      <div style="padding-left:16px;display:flex;flex-wrap:wrap;gap:6px;">
+        ${items.map(t=>`<div style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#0f1117;border-radius:6px;font-size:11px;">
+          <span style="color:#e2e8f0;font-weight:500;">${t.ticker}</span>
+          <span style="color:#475569;">${t.value.toFixed(0)} PLN</span>
+          <span style="color:#64748b;">${totalVal>0?(t.value/totalVal*100).toFixed(1):0}%</span>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// --- ANALYTICS ---
+function _renderAnalytics(data){
   if(!data||!data.metrics)return;
   const m=data.metrics;
   setEl('m-annual',(m.annual_return>0?'+':'')+m.annual_return+'%',m.annual_return>=0?'#34d399':'#f87171');
@@ -479,19 +538,18 @@ function _renderAnalytics(data) {
     fill:true,borderWidth:1.5,pointRadius:0,tension:0.3}]},options:ddOpts});
 }
 
-function _renderCategories(cats) {
+function _renderCategories(cats){
   if(!cats)return;
   const ctx=document.getElementById('chart-pie').getContext('2d');
   if(chartPie)chartPie.destroy();
-  chartPie=new Chart(ctx,{type:'doughnut',
-    data:{labels:cats.map(c=>c.category),datasets:[{data:cats.map(c=>c.value),backgroundColor:cats.map(c=>c.color),borderWidth:0,hoverOffset:6}]},
+  chartPie=new Chart(ctx,{type:'doughnut',data:{labels:cats.map(c=>c.category),datasets:[{data:cats.map(c=>c.value),backgroundColor:cats.map(c=>c.color),borderWidth:0,hoverOffset:6}]},
     options:{animation:false,plugins:{legend:{position:'right',labels:{color:'#64748b',font:{size:11},boxWidth:10,padding:10}},
       tooltip:{callbacks:{label:ctx=>{const total=ctx.dataset.data.reduce((a,b)=>a+b,0);return` ${ctx.label}: ${ctx.raw.toFixed(2)} PLN (${(ctx.raw/total*100).toFixed(1)}%)`;}}}}
     ,cutout:'62%'}});
   buildBarChart(cats);
 }
 
-function _renderCorrelation(data) {
+function _renderCorrelation(data){
   const container=document.getElementById('correlation-container');
   if(!data.tickers||data.tickers.length<2){container.innerHTML='<p style="color:#475569;font-size:12px;">Za mało danych (minimum 2 spółki z historią).</p>';return;}
   const tickers=data.tickers,matrix=data.matrix;
@@ -499,9 +557,7 @@ function _renderCorrelation(data) {
   const highCorr=[];
   for(let i=0;i<tickers.length;i++)for(let j=i+1;j<tickers.length;j++)if(matrix[i][j]>=0.7)highCorr.push({a:tickers[i],b:tickers[j],v:matrix[i][j]});
   const size=Math.max(36,Math.min(56,Math.floor(700/(tickers.length+1))));
-  let html=highCorr.length
-    ?`<div style="padding:10px 14px;background:#f59e0b15;border:1px solid #f59e0b30;border-radius:8px;margin-bottom:16px;font-size:12px;color:#fbbf24;">⚠ Wysoka korelacja (słaba dywersyfikacja): ${highCorr.map(p=>`<strong>${p.a} ↔ ${p.b}</strong> (${p.v.toFixed(2)})`).join(' · ')}</div>`
-    :`<div style="padding:10px 14px;background:#10b98115;border:1px solid #10b98130;border-radius:8px;margin-bottom:16px;font-size:12px;color:#34d399;">✓ Dobra dywersyfikacja — brak par spółek z wysoką korelacją (≥0.7)</div>`;
+  let html=highCorr.length?`<div style="padding:10px 14px;background:#f59e0b15;border:1px solid #f59e0b30;border-radius:8px;margin-bottom:16px;font-size:12px;color:#fbbf24;">⚠ Wysoka korelacja: ${highCorr.map(p=>`<strong>${p.a} ↔ ${p.b}</strong> (${p.v.toFixed(2)})`).join(' · ')}</div>`:`<div style="padding:10px 14px;background:#10b98115;border:1px solid #10b98130;border-radius:8px;margin-bottom:16px;font-size:12px;color:#34d399;">✓ Dobra dywersyfikacja</div>`;
   html+=`<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><tr><td style="width:${size}px;"></td>`;
   tickers.forEach(t=>{const s=t.length>7?t.substring(0,6)+'…':t;html+=`<td style="width:${size}px;height:50px;text-align:center;vertical-align:bottom;padding-bottom:4px;font-size:10px;color:#475569;white-space:nowrap;" title="${t}">${s}</td>`;});
   html+='</tr>';
@@ -511,11 +567,11 @@ function _renderCorrelation(data) {
     row.forEach((val,j)=>{const{bg,text}=corrColor(val,i,j);html+=`<td title="${tickers[i]} ↔ ${tickers[j]}: ${val.toFixed(3)}" style="width:${size}px;height:${size}px;text-align:center;vertical-align:middle;background:${bg};border-radius:4px;font-size:10px;color:${text};cursor:default;font-weight:${Math.abs(val)>0.4?600:400};">${i===j?'—':val.toFixed(2)}</td>`;});
     html+='</tr>';
   });
-  html+=`</table></div><div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;font-size:11px;color:#475569;"><span>🔴 Wysoka (≥0.7) — słaba dywersyfikacja</span><span>🟡 Średnia (0.4–0.7)</span><span>⚪ Niska — dobra dywersyfikacja</span><span>🔵 Ujemna — idealna dywersyfikacja</span></div>`;
+  html+=`</table></div>`;
   container.innerHTML=html;
 }
 
-function _renderMonteCarlo(data) {
+function _renderMonteCarlo(data){
   if(!data||!data.dates)return;
   document.getElementById('mc-stats').style.display='grid';
   document.getElementById('mc-median').textContent=data.mean_final.toFixed(0)+' PLN';
@@ -530,75 +586,23 @@ function _renderMonteCarlo(data) {
   chartMonteCarlo=new Chart(ctx,{type:'line',data:{labels:data.dates,datasets},options:{...chartOpts('PLN',true)}});
 }
 
-function _renderDividends(data) {
-  document.getElementById('div-total').textContent=(data.total_received||0).toFixed(2)+' PLN';
-  document.getElementById('div-annual').textContent=(data.annual_forecast||0).toFixed(2)+' PLN';
-  document.getElementById('div-monthly').textContent=(data.monthly_forecast||0).toFixed(2)+' PLN';
-  renderDividendHeatmap(data.heatmap||{});
-  const list=document.getElementById('div-list');
-  if(!data.dividends||!data.dividends.length){list.innerHTML='<p style="color:#475569;">Brak dywidend w historii.</p>';return;}
-  list.innerHTML=`<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#475569;border-bottom:1px solid #1e2235;"><th style="text-align:left;padding:6px 8px;">Data</th><th style="text-align:left;padding:6px 8px;">Ticker</th><th style="text-align:right;padding:6px 8px;">Kwota</th></tr></thead><tbody>${data.dividends.map(d=>`<tr style="border-bottom:1px solid #1a1d2a;"><td style="padding:6px 8px;color:#64748b;font-size:12px;">${d.date}</td><td style="padding:6px 8px;color:#e2e8f0;font-size:12px;font-weight:500;">${d.ticker||'—'}</td><td style="padding:6px 8px;text-align:right;color:#34d399;font-size:12px;">+${d.amount.toFixed(2)} PLN</td></tr>`).join('')}</tbody></table>`;
-}
-
-function _renderGoals(goals) {
-  const container=document.getElementById('goals-list');
-  if(!goals.length){container.innerHTML='<p style="color:#475569;font-size:12px;">Brak celów. Dodaj pierwszy cel.</p>';return;}
-  container.innerHTML=goals.map(g=>{
-    const color=g.will_achieve?'#34d399':'#f87171';
-    const statusText=g.will_achieve?'✓ Na dobrej drodze':'⚠ Potrzeba więcej wpłat';
-    const barW=Math.min(g.progress_pct,100);
-    return`<div style="margin-bottom:16px;padding:16px;background:#0f1117;border-radius:10px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <span style="font-size:14px;font-weight:600;color:#fff;">${g.name}</span>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:12px;color:${color};">${statusText}</span>
-          <button onclick="deleteGoal('${g.id}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;">×</button>
-        </div>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:12px;color:#64748b;">
-        <span>Cel: <strong style="color:#e2e8f0;">${Number(g.target).toLocaleString()} PLN</strong></span>
-        <span>Termin: <strong style="color:#e2e8f0;">${g.deadline}</strong> · ${g.years_left} lat</span>
-      </div>
-      <div style="position:relative;height:8px;background:#1e2235;border-radius:4px;margin-bottom:10px;overflow:hidden;">
-        <div style="height:100%;width:${barW}%;background:${color};border-radius:4px;opacity:0.8;transition:width .3s;"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px;color:#64748b;">
-        <div>Postęp: <strong style="color:#e2e8f0;">${g.progress_pct}%</strong></div>
-        <div>Prognoza: <strong style="color:#e2e8f0;">${Number(g.projected_value).toLocaleString()} PLN</strong></div>
-        <div>Wpłata/mies: <strong style="color:${color};">${g.required_monthly>0?Number(g.required_monthly.toFixed(0)).toLocaleString()+' PLN':'—'}</strong></div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function _renderAlerts(data) {
-  const triggered=document.getElementById('alerts-triggered');
-  triggered.innerHTML=data.triggered&&data.triggered.length
-    ?data.triggered.map(a=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f4375015;border:1px solid #f4375030;border-radius:8px;margin-bottom:8px;"><span style="font-size:16px;">🔔</span><span style="font-size:13px;color:#f87171;font-weight:500;">${a.name}</span><span style="font-size:12px;color:#94a3b8;margin-left:auto;">Aktualna wartość: ${a.current_value}</span></div>`).join('')
-    :'';
-  const list=document.getElementById('alerts-list');
-  if(!data.alerts||!data.alerts.length){list.innerHTML='<p style="color:#475569;font-size:12px;">Brak alertów.</p>';return;}
-  list.innerHTML=`<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#475569;border-bottom:1px solid #1e2235;"><th style="text-align:left;padding:6px 8px;">Alert</th><th style="text-align:left;padding:6px 8px;">Warunek</th><th style="text-align:left;padding:6px 8px;">Status</th><th style="text-align:center;padding:6px 8px;">Usuń</th></tr></thead><tbody>${data.alerts.map(a=>{const statusColor=a.triggered?'#f59e0b':'#34d399';const statusText=a.triggered?'⚡ Wyzwolony':'● Aktywny';return`<tr style="border-bottom:1px solid #1a1d2a;"><td style="padding:8px;color:#e2e8f0;font-size:12px;font-weight:500;">${a.name}</td><td style="padding:8px;color:#64748b;font-size:12px;">${a.condition==='below'?'Poniżej':'Powyżej'} ${a.value}</td><td style="padding:8px;font-size:12px;color:${statusColor};">${statusText}</td><td style="padding:8px;text-align:center;"><button onclick="deleteAlert('${a.id}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:16px;">×</button></td></tr>`;}).join('')}</tbody></table>`;
-}
-
-// --- MONTE CARLO (manual reload) ---
-async function loadMonteCarlo() {
-  const years=document.getElementById('mc-years').value;
-  const monthly=document.getElementById('mc-monthly').value;
-  const resp=await fetch(`/api/montecarlo?portfolio_id=${PORTFOLIO_ID}&years=${years}&monthly=${monthly}`);
-  _renderMonteCarlo(await resp.json());
-}
-
 // --- DYWIDENDY ---
-function renderDividendHeatmap(heatmap) {
+function switchDivTab(tab){
+  ['history','yearly','tracker'].forEach(t=>{
+    document.getElementById(`div-panel-${t}`).style.display=t===tab?'block':'none';
+    const btn=document.getElementById(`div-tab-${t}`);
+    if(btn){btn.style.borderBottom=t===tab?'2px solid #6366f1':'2px solid transparent';btn.style.color=t===tab?'#a5b4fc':'#64748b';}
+  });
+}
+function renderDividendHeatmap(heatmap){
   const container=document.getElementById('div-heatmap');
   if(!Object.keys(heatmap).length){container.innerHTML='';return;}
   const months=Object.keys(heatmap).sort();
   const maxVal=Math.max(...Object.values(heatmap));
   container.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">${months.map(m=>{const val=heatmap[m];const intensity=maxVal>0?val/maxVal:0;const bg=`rgba(52,211,153,${0.1+intensity*0.8})`;return`<div title="${m}: ${val.toFixed(2)} PLN" style="padding:4px 8px;background:${bg};border-radius:4px;font-size:11px;color:#e2e8f0;cursor:default;">${m.substring(5)} ${val.toFixed(0)}</div>`;}).join('')}</div><div style="font-size:11px;color:#475569;">Dywidendy per miesiąc</div>`;
 }
-function toggleDivForm() { const f=document.getElementById('div-form');f.style.display=f.style.display==='none'?'block':'none'; }
-async function saveDividend() {
+function toggleDivForm(){const f=document.getElementById('div-form');f.style.display=f.style.display==='none'?'block':'none';}
+async function saveDividend(){
   const ticker=document.getElementById('div-ticker').value.trim().toUpperCase();
   const amount=parseFloat(document.getElementById('div-amount').value);
   const date=document.getElementById('div-date').value;
@@ -608,9 +612,62 @@ async function saveDividend() {
   const resp=await fetch(`/api/dividends?portfolio_id=${PORTFOLIO_ID}`);
   _renderDividends(await resp.json());
 }
+function _renderDividends(data){
+  document.getElementById('div-total').textContent=(data.total_received||0).toFixed(2)+' PLN';
+  document.getElementById('div-annual').textContent=(data.annual_forecast||0).toFixed(2)+' PLN';
+  document.getElementById('div-monthly').textContent=(data.monthly_forecast||0).toFixed(2)+' PLN';
+  renderDividendHeatmap(data.heatmap||{});
+  const list=document.getElementById('div-list');
+  if(!data.dividends||!data.dividends.length){list.innerHTML='<p style="color:#475569;">Brak dywidend w historii.</p>';}
+  else{list.innerHTML=`<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#475569;border-bottom:1px solid #1e2235;"><th style="text-align:left;padding:6px 8px;">Data</th><th style="text-align:left;padding:6px 8px;">Ticker</th><th style="text-align:right;padding:6px 8px;">Kwota</th></tr></thead><tbody>${data.dividends.map(d=>`<tr style="border-bottom:1px solid #1a1d2a;"><td style="padding:6px 8px;color:#64748b;font-size:12px;">${d.date}</td><td style="padding:6px 8px;color:#e2e8f0;font-size:12px;font-weight:500;">${d.ticker||'—'}</td><td style="padding:6px 8px;text-align:right;color:#34d399;font-size:12px;">+${d.amount.toFixed(2)} PLN</td></tr>`).join('')}</tbody></table>`;}
+  if(data.by_year)_renderDivYearly(data.by_year);
+  if(data.tracker)_renderDivTracker(data.tracker);
+}
+function _renderDivYearly(byYear){
+  const years=Object.keys(byYear).sort();
+  const values=years.map(y=>byYear[y]);
+  if(!years.length){document.getElementById('div-yearly-table').innerHTML='<p style="color:#475569;font-size:12px;">Brak danych.</p>';return;}
+  const ctx=document.getElementById('chart-div-yearly').getContext('2d');
+  if(chartDivYearly)chartDivYearly.destroy();
+  chartDivYearly=new Chart(ctx,{type:'bar',data:{labels:years,datasets:[{label:'Dywidendy (PLN)',data:values,backgroundColor:years.map((y,i)=>i===years.length-1?'#6366f180':'#34d39980'),borderColor:years.map((y,i)=>i===years.length-1?'#6366f1':'#34d399'),borderWidth:1,borderRadius:4}]},
+    options:{responsive:true,animation:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'#1e2235',borderColor:'#2d3148',borderWidth:1,titleColor:'#94a3b8',bodyColor:'#e2e8f0',callbacks:{label:ctx=>` ${ctx.raw.toFixed(2)} PLN`}}},
+      scales:{x:{ticks:{color:'#334155',font:{size:11}},grid:{color:'#1a1d2a'}},y:{ticks:{color:'#334155',font:{size:11}},grid:{color:'#1a1d2a'}}}}});
+  const total=values.reduce((a,b)=>a+b,0);
+  const avg=total/years.length;
+  const best=Math.max(...values);
+  const bestYear=years[values.indexOf(best)];
+  const rows=years.map((y,i)=>{const val=values[i];const prev=i>0?values[i-1]:null;const change=prev?((val-prev)/prev*100):null;const changeStr=change!==null?`<span style="color:${change>=0?'#34d399':'#f87171'}">${change>=0?'+':''}${change.toFixed(1)}%</span>`:'—';const isCurrentYear=y===new Date().getFullYear().toString();return`<tr style="border-bottom:1px solid #1a1d2a;"><td style="padding:8px;color:${isCurrentYear?'#a5b4fc':'#e2e8f0'};font-size:12px;">${y}${isCurrentYear?' <span style="font-size:10px;color:#6366f1;">(bieżący)</span>':''}</td><td style="padding:8px;color:#34d399;font-size:12px;text-align:right;">${val.toFixed(2)} PLN</td><td style="padding:8px;font-size:12px;text-align:right;">${changeStr}</td></tr>`;}).reverse().join('');
+  document.getElementById('div-yearly-table').innerHTML=`<div class="grid grid-cols-3 gap-3 mb-4" style="margin-top:16px;"><div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;"><div style="font-size:10px;color:#475569;margin-bottom:4px;">ŁĄCZNIE</div><div style="font-size:16px;font-weight:600;color:#34d399;">${total.toFixed(2)} PLN</div></div><div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;"><div style="font-size:10px;color:#475569;margin-bottom:4px;">ŚREDNIO / ROK</div><div style="font-size:16px;font-weight:600;color:#fff;">${avg.toFixed(2)} PLN</div></div><div style="text-align:center;padding:12px;background:#0f1117;border-radius:8px;"><div style="font-size:10px;color:#475569;margin-bottom:4px;">NAJLEPSZY ROK</div><div style="font-size:16px;font-weight:600;color:#a5b4fc;">${bestYear} · ${best.toFixed(2)} PLN</div></div></div><table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#475569;border-bottom:1px solid #1e2235;"><th style="text-align:left;padding:8px;">Rok</th><th style="text-align:right;padding:8px;">Kwota</th><th style="text-align:right;padding:8px;">Zmiana r/r</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function _renderDivTracker(tracker){
+  const container=document.getElementById('div-tracker-list');
+  if(!tracker||!tracker.length){container.innerHTML='<p style="color:#475569;font-size:12px;">Brak danych o historii dywidend dla posiadanych spółek.</p>';return;}
+  const today=new Date();
+  container.innerHTML=tracker.map(item=>{
+    const nextDate=new Date(item.next_date);
+    const isPast=nextDate<today;
+    const isSoon=item.days_until>=0&&item.days_until<=30;
+    const urgencyColor=isPast?'#475569':isSoon?'#f59e0b':'#34d399';
+    const daysLabel=isPast?`${Math.abs(item.days_until)} dni temu`:item.days_until===0?'Dzisiaj!':`za ${item.days_until} dni`;
+    return`<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:#0f1117;border-radius:8px;margin-bottom:8px;">
+      <div style="width:8px;height:8px;border-radius:50%;background:${urgencyColor};flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+          <span style="font-size:13px;font-weight:600;color:#e2e8f0;">${item.ticker}</span>
+          <span style="font-size:11px;color:#475569;background:#1a1d27;padding:2px 6px;border-radius:4px;">${item.frequency}</span>
+        </div>
+        <div style="font-size:11px;color:#64748b;">Ostatnia: ${item.last_date} · Szacowana następna: <strong style="color:${urgencyColor};">${item.next_date}</strong></div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-size:14px;font-weight:600;color:#34d399;">~${item.estimated_amount.toFixed(2)} PLN</div>
+        <div style="font-size:11px;color:${urgencyColor};">${daysLabel}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
 
 // --- CELE ---
-function setGoalMode(mode) {
+function setGoalMode(mode){
   goalMode=mode;
   document.getElementById('goal-fields-target').style.display=mode==='target'?'block':'none';
   document.getElementById('goal-fields-monthly').style.display=mode==='monthly'?'block':'none';
@@ -621,7 +678,7 @@ function setGoalMode(mode) {
   document.getElementById('goal-mode-monthly').style.color=mode==='monthly'?'#fff':'#94a3b8';
   document.getElementById('goal-mode-monthly').style.border=mode==='monthly'?'none':'1px solid #2d3148';
 }
-function calcGoal() {
+function calcGoal(){
   const target=parseFloat(document.getElementById('goal-target').value);
   const deadline=document.getElementById('goal-deadline').value;
   const rate=parseFloat(document.getElementById('goal-rate').value)/100;
@@ -644,7 +701,7 @@ function calcGoal() {
   if(goalChart)goalChart.destroy();
   goalChart=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Wartość portfela',data:total,borderColor:'#6366f1',backgroundColor:'#6366f115',fill:true,borderWidth:2,pointRadius:0,tension:0.4},{label:'Wpłaty',data:invested,borderColor:'#f59e0b',borderDash:[4,3],backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:0.4},{label:'Cel',data:Array(labels.length).fill(target),borderColor:'#34d399',borderDash:[2,4],borderWidth:1,pointRadius:0}]},options:{responsive:true,animation:false,plugins:{legend:{labels:{color:'#64748b',font:{size:10},boxWidth:8}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.raw.toLocaleString()} PLN`}}},scales:{x:{display:false},y:{ticks:{color:'#334155',font:{size:10},callback:v=>v.toLocaleString()},grid:{color:'#1a1d2a'}}}}});
 }
-function calcGoalFromMonthly() {
+function calcGoalFromMonthly(){
   const monthly=parseFloat(document.getElementById('goal-monthly-input').value);
   const years=parseFloat(document.getElementById('goal-years-input').value);
   const rate=parseFloat(document.getElementById('goal-rate2').value)/100;
@@ -667,45 +724,36 @@ function calcGoalFromMonthly() {
   if(goalChart2)goalChart2.destroy();
   goalChart2=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Wartość portfela',data:total,borderColor:'#6366f1',backgroundColor:'#6366f115',fill:true,borderWidth:2,pointRadius:0,tension:0.4},{label:'Wpłaty',data:invested,borderColor:'#f59e0b',borderDash:[4,3],backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:0.4}]},options:{responsive:true,animation:false,plugins:{legend:{labels:{color:'#64748b',font:{size:10},boxWidth:8}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.raw.toLocaleString()} PLN`}}},scales:{x:{display:false},y:{ticks:{color:'#334155',font:{size:10},callback:v=>v.toLocaleString()},grid:{color:'#1a1d2a'}}}}});
 }
-function toggleGoalForm() {
-  const f=document.getElementById('goal-form');
-  const isHidden=f.style.display==='none';
-  f.style.display=isHidden?'block':'none';
-  if(isHidden)setGoalMode('target');
-}
-async function saveGoal() {
+function toggleGoalForm(){const f=document.getElementById('goal-form');const isHidden=f.style.display==='none';f.style.display=isHidden?'block':'none';if(isHidden)setGoalMode('target');}
+async function saveGoal(){
   const name=document.getElementById('goal-name').value.trim();
   if(!name)return alert('Podaj nazwę celu');
   let target,deadline,monthly;
-  if(goalMode==='target'){
-    target=parseFloat(document.getElementById('goal-target').value);
-    deadline=document.getElementById('goal-deadline').value;
-    monthly=parseFloat(document.getElementById('goal-calc-monthly')?.textContent)||0;
-    if(!target||!deadline)return alert('Wypełnij kwotę i termin');
-  } else {
-    monthly=parseFloat(document.getElementById('goal-monthly-input').value);
-    const years=parseFloat(document.getElementById('goal-years-input').value);
-    target=parseFloat(document.getElementById('goal-calc-total')?.textContent?.replace(/\s/g,''))||0;
-    const d=new Date();d.setFullYear(d.getFullYear()+(years||10));
-    deadline=d.toISOString().split('T')[0];
-    if(!monthly||!years)return alert('Wypełnij wpłatę i liczbę lat');
-  }
+  if(goalMode==='target'){target=parseFloat(document.getElementById('goal-target').value);deadline=document.getElementById('goal-deadline').value;monthly=parseFloat(document.getElementById('goal-calc-monthly')?.textContent)||0;if(!target||!deadline)return alert('Wypełnij kwotę i termin');}
+  else{monthly=parseFloat(document.getElementById('goal-monthly-input').value);const years=parseFloat(document.getElementById('goal-years-input').value);target=parseFloat(document.getElementById('goal-calc-total')?.textContent?.replace(/\s/g,''))||0;const d=new Date();d.setFullYear(d.getFullYear()+(years||10));deadline=d.toISOString().split('T')[0];if(!monthly||!years)return alert('Wypełnij wpłatę i liczbę lat');}
   await fetch(`/api/goals?portfolio_id=${PORTFOLIO_ID}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,target,deadline,monthly_investment:monthly||0})});
   toggleGoalForm();
   const resp=await fetch(`/api/goals?portfolio_id=${PORTFOLIO_ID}`);
   _renderGoals(await resp.json());
 }
-async function deleteGoal(id) {
+async function deleteGoal(id){
   if(!confirm('Usunąć cel?'))return;
   await fetch(`/api/goals/${id}?portfolio_id=${PORTFOLIO_ID}`,{method:'DELETE'});
   const resp=await fetch(`/api/goals?portfolio_id=${PORTFOLIO_ID}`);
   _renderGoals(await resp.json());
 }
+function _renderGoals(goals){
+  const container=document.getElementById('goals-list');
+  if(!goals.length){container.innerHTML='<p style="color:#475569;font-size:12px;">Brak celów. Dodaj pierwszy cel.</p>';return;}
+  container.innerHTML=goals.map(g=>{const color=g.will_achieve?'#34d399':'#f87171';const statusText=g.will_achieve?'✓ Na dobrej drodze':'⚠ Potrzeba więcej wpłat';const barW=Math.min(g.progress_pct,100);
+    return`<div style="margin-bottom:16px;padding:16px;background:#0f1117;border-radius:10px;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><span style="font-size:14px;font-weight:600;color:#fff;">${g.name}</span><div style="display:flex;align-items:center;gap:10px;"><span style="font-size:12px;color:${color};">${statusText}</span><button onclick="deleteGoal('${g.id}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;">×</button></div></div><div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:12px;color:#64748b;"><span>Cel: <strong style="color:#e2e8f0;">${Number(g.target).toLocaleString()} PLN</strong></span><span>Termin: <strong style="color:#e2e8f0;">${g.deadline}</strong> · ${g.years_left} lat</span></div><div style="position:relative;height:8px;background:#1e2235;border-radius:4px;margin-bottom:10px;overflow:hidden;"><div style="height:100%;width:${barW}%;background:${color};border-radius:4px;opacity:0.8;transition:width .3s;"></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px;color:#64748b;"><div>Postęp: <strong style="color:#e2e8f0;">${g.progress_pct}%</strong></div><div>Prognoza: <strong style="color:#e2e8f0;">${Number(g.projected_value).toLocaleString()} PLN</strong></div><div>Wpłata/mies: <strong style="color:${color};">${g.required_monthly>0?Number(g.required_monthly.toFixed(0)).toLocaleString()+' PLN':'—'}</strong></div></div></div>`;
+  }).join('');
+}
 
 // --- ALERTY ---
-function toggleAlertForm() { const f=document.getElementById('alert-form');f.style.display=f.style.display==='none'?'block':'none'; }
-function updateAlertForm() { const type=document.getElementById('alert-type').value;document.getElementById('alert-ticker-wrap').style.display=type==='price'?'block':'none';document.getElementById('alert-value-label').textContent=type==='portfolio_pnl_pct'?'Wartość (%)':'Wartość (PLN)'; }
-async function saveAlert() {
+function toggleAlertForm(){const f=document.getElementById('alert-form');f.style.display=f.style.display==='none'?'block':'none';}
+function updateAlertForm(){const type=document.getElementById('alert-type').value;document.getElementById('alert-ticker-wrap').style.display=type==='price'?'block':'none';document.getElementById('alert-value-label').textContent=type==='portfolio_pnl_pct'?'Wartość (%)':'Wartość (PLN)';}
+async function saveAlert(){
   const type=document.getElementById('alert-type').value;
   const ticker=type==='price'?document.getElementById('alert-ticker').value:null;
   const condition=document.getElementById('alert-condition').value;
@@ -717,45 +765,44 @@ async function saveAlert() {
   const resp=await fetch(`/api/alerts?portfolio_id=${PORTFOLIO_ID}`);
   _renderAlerts(await resp.json());
 }
-async function deleteAlert(id) {
+async function deleteAlert(id){
   await fetch(`/api/alerts/${id}?portfolio_id=${PORTFOLIO_ID}`,{method:'DELETE'});
   const resp=await fetch(`/api/alerts?portfolio_id=${PORTFOLIO_ID}`);
   _renderAlerts(await resp.json());
 }
+function _renderAlerts(data){
+  const triggered=document.getElementById('alerts-triggered');
+  triggered.innerHTML=data.triggered&&data.triggered.length?data.triggered.map(a=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f4375015;border:1px solid #f4375030;border-radius:8px;margin-bottom:8px;"><span style="font-size:16px;">🔔</span><span style="font-size:13px;color:#f87171;font-weight:500;">${a.name}</span><span style="font-size:12px;color:#94a3b8;margin-left:auto;">Aktualna wartość: ${a.current_value}</span></div>`).join(''):'';
+  const list=document.getElementById('alerts-list');
+  if(!data.alerts||!data.alerts.length){list.innerHTML='<p style="color:#475569;font-size:12px;">Brak alertów.</p>';return;}
+  list.innerHTML=`<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#475569;border-bottom:1px solid #1e2235;"><th style="text-align:left;padding:6px 8px;">Alert</th><th style="text-align:left;padding:6px 8px;">Warunek</th><th style="text-align:left;padding:6px 8px;">Status</th><th style="text-align:center;padding:6px 8px;">Usuń</th></tr></thead><tbody>${data.alerts.map(a=>{const statusColor=a.triggered?'#f59e0b':'#34d399';const statusText=a.triggered?'⚡ Wyzwolony':'● Aktywny';return`<tr style="border-bottom:1px solid #1a1d2a;"><td style="padding:8px;color:#e2e8f0;font-size:12px;font-weight:500;">${a.name}</td><td style="padding:8px;color:#64748b;font-size:12px;">${a.condition==='below'?'Poniżej':'Powyżej'} ${a.value}</td><td style="padding:8px;font-size:12px;color:${statusColor};">${statusText}</td><td style="padding:8px;text-align:center;"><button onclick="deleteAlert('${a.id}')" style="background:none;border:none;color:#475569;cursor:pointer;font-size:16px;">×</button></td></tr>`;}).join('')}</tbody></table>`;
+}
+
+// --- MONTE CARLO ---
+async function loadMonteCarlo(){
+  const years=document.getElementById('mc-years').value;
+  const monthly=document.getElementById('mc-monthly').value;
+  const resp=await fetch(`/api/montecarlo?portfolio_id=${PORTFOLIO_ID}&years=${years}&monthly=${monthly}`);
+  _renderMonteCarlo(await resp.json());
+}
 
 // --- REBALANCING ---
-function renderRebalancing() {
+function renderRebalancing(){
   const container=document.getElementById('rebalancing-container');
   if(!rebalData||!rebalData.suggestions||!rebalData.suggestions.length){container.innerHTML='<p style="color:#475569;font-size:12px;">Ustaw docelowe wagi aby zobaczyć sugestie.</p>';return;}
-  container.innerHTML=rebalData.suggestions.map(s=>{
-    const actionColor=s.action==='kup'?'#34d399':s.action==='sprzedaj'?'#f87171':'#475569';
-    const actionText=s.action==='kup'?'▲ Dokup':s.action==='sprzedaj'?'▼ Sprzedaj':'✓ OK';
-    return`<div style="margin-bottom:16px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-        <span style="font-size:13px;color:#e2e8f0;font-weight:500;">${s.category}</span>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <span style="font-size:12px;color:#64748b;">Cel: <strong style="color:#94a3b8;">${s.target_pct}%</strong></span>
-          <span style="font-size:12px;color:#64748b;">Teraz: <strong style="color:#e2e8f0;">${s.actual_pct}%</strong></span>
-          <span style="font-size:12px;font-weight:500;color:${actionColor};min-width:100px;text-align:right;">${actionText} ${Math.abs(s.diff_value)>50?Math.abs(s.diff_value).toFixed(0)+' PLN':''}</span>
-        </div>
-      </div>
-      <div style="position:relative;height:8px;background:#1e2235;border-radius:4px;overflow:visible;">
-        <div style="position:absolute;left:0;top:0;height:100%;width:${Math.min(s.actual_pct,100)}%;background:${actionColor};border-radius:4px;opacity:0.7;transition:width .3s;"></div>
-        <div style="position:absolute;top:-3px;height:14px;width:2px;background:#fff;border-radius:1px;left:${Math.min(s.target_pct,100)}%;transform:translateX(-50%);" title="Cel: ${s.target_pct}%"></div>
-      </div>
-    </div>`;
+  container.innerHTML=rebalData.suggestions.map(s=>{const actionColor=s.action==='kup'?'#34d399':s.action==='sprzedaj'?'#f87171':'#475569';const actionText=s.action==='kup'?'▲ Dokup':s.action==='sprzedaj'?'▼ Sprzedaj':'✓ OK';
+    return`<div style="margin-bottom:16px;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:13px;color:#e2e8f0;font-weight:500;">${s.category}</span><div style="display:flex;align-items:center;gap:12px;"><span style="font-size:12px;color:#64748b;">Cel: <strong style="color:#94a3b8;">${s.target_pct}%</strong></span><span style="font-size:12px;color:#64748b;">Teraz: <strong style="color:#e2e8f0;">${s.actual_pct}%</strong></span><span style="font-size:12px;font-weight:500;color:${actionColor};min-width:100px;text-align:right;">${actionText} ${Math.abs(s.diff_value)>50?Math.abs(s.diff_value).toFixed(0)+' PLN':''}</span></div></div><div style="position:relative;height:8px;background:#1e2235;border-radius:4px;overflow:visible;"><div style="position:absolute;left:0;top:0;height:100%;width:${Math.min(s.actual_pct,100)}%;background:${actionColor};border-radius:4px;opacity:0.7;transition:width .3s;"></div><div style="position:absolute;top:-3px;height:14px;width:2px;background:#fff;border-radius:1px;left:${Math.min(s.target_pct,100)}%;transform:translateX(-50%);" title="Cel: ${s.target_pct}%"></div></div></div>`;
   }).join('');
 }
-function buildRebalInputs() {
+function buildRebalInputs(){
   const CATEGORIES=['Akcje GPW','ETF','Obligacje','Surowce','Krypto','Inne'];
   const container=document.getElementById('rebal-inputs');
-  container.innerHTML=CATEGORIES.map(cat=>{
-    const current=rebalData?.current?.[cat]||0,target=rebalTargets[cat]||0;
+  container.innerHTML=CATEGORIES.map(cat=>{const current=rebalData?.current?.[cat]||0,target=rebalTargets[cat]||0;
     return`<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;"><span style="font-size:12px;color:#94a3b8;width:100px;">${cat}</span><span style="font-size:11px;color:#475569;width:60px;">Teraz: ${current.toFixed(1)}%</span><input type="number" min="0" max="100" step="5" value="${target}" id="rebal-input-${cat.replace(/\s/g,'_')}" oninput="updateRebalSum()" style="width:70px;background:#1a1d27;border:1px solid #2d3148;border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:12px;outline:none;"><span style="font-size:12px;color:#475569;">%</span></div>`;
   }).join('');
   updateRebalSum();
 }
-function updateRebalSum() {
+function updateRebalSum(){
   const CATEGORIES=['Akcje GPW','ETF','Obligacje','Surowce','Krypto','Inne'];
   let sum=0;
   CATEGORIES.forEach(cat=>{const el=document.getElementById('rebal-input-'+cat.replace(/\s/g,'_'));if(el)sum+=parseFloat(el.value)||0;});
@@ -763,12 +810,12 @@ function updateRebalSum() {
   ind.textContent=`Suma: ${sum}%`;
   ind.style.color=Math.abs(sum-100)<1?'#34d399':sum>100?'#f87171':'#f59e0b';
 }
-function toggleRebalancingEdit() {
+function toggleRebalancingEdit(){
   const ed=document.getElementById('rebal-editor'),btn=document.getElementById('rebal-edit-btn');
   if(ed.style.display==='none'){ed.style.display='block';btn.textContent='✕ Zamknij';}
-  else{ed.style.display='none';btn.textContent='✏️ Edytuj cele';}
+  else{ed.style.display='none';btn.textContent='Edytuj cele';}
 }
-async function saveRebalancing() {
+async function saveRebalancing(){
   const CATEGORIES=['Akcje GPW','ETF','Obligacje','Surowce','Krypto','Inne'];
   const targets={};
   CATEGORIES.forEach(cat=>{const el=document.getElementById('rebal-input-'+cat.replace(/\s/g,'_'));if(el)targets[cat]=parseFloat(el.value)||0;});
@@ -781,7 +828,7 @@ async function saveRebalancing() {
 
 // --- BENCHMARK ---
 const BENCH_COLORS=['#f59e0b','#22d3ee','#f43f5e','#a78bfa','#34d399','#fb923c','#38bdf8','#e879f9'];
-function getBenchStartIndex() {
+function getBenchStartIndex(){
   const sel=document.getElementById('bench-start').value;
   if(sel==='all')return 0;
   if(sel==='custom'){const val=document.getElementById('bench-start-custom').value;if(!val)return 0;const idx=historyData.dates.findIndex(d=>d>=val);return idx>=0?idx:0;}
@@ -789,16 +836,16 @@ function getBenchStartIndex() {
   const y=cutoff.getFullYear(),m=String(cutoff.getMonth()+1).padStart(2,'0'),d=String(cutoff.getDate()).padStart(2,'0');
   const cutoffStr=`${y}-${m}-${d}`;const idx=historyData.dates.findIndex(d=>d>=cutoffStr);return idx>=0?idx:0;
 }
-function selectBenchmark(ticker,chipEl) {
+function selectBenchmark(ticker,chipEl){
   if(activeBenches[ticker]){delete activeBenches[ticker];chipEl.classList.remove('active');updateActiveBenchTags();renderBenchChart();}
   else{chipEl.classList.add('active');document.getElementById('bench-status').textContent='Ładowanie...';addBenchmark(ticker,BENCH_PRESETS[ticker]||ticker);}
 }
-async function loadBenchmark() {
+async function loadBenchmark(){
   const ticker=document.getElementById('bench-ticker').value.trim().toUpperCase();
   if(!ticker)return;document.getElementById('bench-ticker').value='';
   await addBenchmark(ticker,ticker);
 }
-async function addBenchmark(ticker,label) {
+async function addBenchmark(ticker,label){
   if(!historyData)return;
   const end=historyData.dates[historyData.dates.length-1];
   const startDt=new Date();startDt.setFullYear(startDt.getFullYear()-5);
@@ -812,17 +859,17 @@ async function addBenchmark(ticker,label) {
     updateActiveBenchTags();renderBenchChart();
   }catch(e){document.getElementById('bench-status').textContent='❌ Błąd';}
 }
-function removeBenchmark(ticker) {
+function removeBenchmark(ticker){
   delete activeBenches[ticker];
   const chip=document.getElementById('bchip-'+ticker);if(chip)chip.classList.remove('active');
   updateActiveBenchTags();renderBenchChart();
 }
-function updateActiveBenchTags() {
+function updateActiveBenchTags(){
   document.getElementById('active-benches').innerHTML=Object.entries(activeBenches).map(([ticker,b])=>
     `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:12px;background:#1e2235;border:1px solid #2d3148;color:#94a3b8;">${b.label}<span onclick="removeBenchmark('${ticker}')" style="cursor:pointer;color:#475569;font-size:14px;line-height:1;">×</span></span>`
   ).join('');
 }
-function renderBenchChart() {
+function renderBenchChart(){
   if(!historyData)return;
   const sel=document.getElementById('bench-start').value;
   document.getElementById('bench-start-custom').style.display=sel==='custom'?'inline-block':'none';
@@ -853,7 +900,7 @@ function renderBenchChart() {
 }
 
 // --- TICKER MODAL ---
-async function openTickerModal(ticker) {
+async function openTickerModal(ticker){
   document.getElementById('ticker-modal-bg').style.display='block';
   document.getElementById('ticker-modal').style.display='block';
   document.getElementById('ticker-modal-title').textContent=`${ticker} — historia ceny`;
@@ -882,25 +929,25 @@ async function openTickerModal(ticker) {
     </div>`
   ).join('');
 }
-function closeTickerModal() { document.getElementById('ticker-modal-bg').style.display='none'; document.getElementById('ticker-modal').style.display='none'; }
+function closeTickerModal(){document.getElementById('ticker-modal-bg').style.display='none';document.getElementById('ticker-modal').style.display='none';}
 
 // --- INIT ---
 initChips();
 
-// Historia i dashboard data ładują się równolegle
 const historyPromise = loadHistory();
 
 fetch(`/api/dashboard_data?portfolio_id=${PORTFOLIO_ID}`)
   .then(r => r.json())
   .then(data => {
-    if(data.analytics) _renderAnalytics(data.analytics);
+    if(data.analytics)  _renderAnalytics(data.analytics);
     if(data.categories) _renderCategories(data.categories);
+    if(data.sectors)    _renderSectors(data.sectors);
     if(data.correlation) _renderCorrelation(data.correlation);
-    if(data.rebalancing) { rebalData=data.rebalancing; renderRebalancing(); buildRebalInputs(); }
+    if(data.rebalancing){ rebalData=data.rebalancing; renderRebalancing(); buildRebalInputs(); }
     if(data.montecarlo) _renderMonteCarlo(data.montecarlo);
-    if(data.dividends) _renderDividends(data.dividends);
-    if(data.goals) _renderGoals(data.goals);
-    if(data.alerts) _renderAlerts(data.alerts);
+    if(data.dividends)  _renderDividends(data.dividends);
+    if(data.goals)      _renderGoals(data.goals);
+    if(data.alerts)     _renderAlerts(data.alerts);
   })
   .catch(e => console.error('dashboard_data error:', e));
 </script>

@@ -25,7 +25,6 @@ templates = Jinja2Templates(directory="templates")
 # --- Pomocnicze ---
 
 def _portfolio_context(portfolio_id: str):
-    """Zwraca portfolio, ceny i podstawowe obliczenia. Wywołuj raz per request."""
     portfolio = get_portfolio_holdings(portfolio_id)
     tickers = list(portfolio.keys())
     prices = get_prices(tickers) if tickers else {}
@@ -48,7 +47,6 @@ async def dashboard(request: Request, portfolio_id: str = "default"):
     portfolio, tickers, prices, total_value, total_cost = _portfolio_context(portfolio_id)
     total_pnl = total_value - total_cost
     current = next((p for p in portfolios if p["id"] == portfolio_id), portfolios[0])
-
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -73,7 +71,6 @@ async def table(request: Request, portfolio_id: str = "default"):
     portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
     transactions = get_transactions_for(portfolio_id)
     current = next((p for p in portfolios if p["id"] == portfolio_id), portfolios[0])
-
     return templates.TemplateResponse(
         request=request,
         name="portfolio.html",
@@ -187,7 +184,6 @@ async def upload_files(
     with open(IMPORTS_META, "w") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    # Wyczyść cache historii po imporcie
     _clear_history_cache(portfolio_id)
 
     return templates.TemplateResponse(
@@ -206,7 +202,6 @@ def _clear_history_cache(portfolio_id: str):
                 os.remove(f)
             except Exception:
                 pass
-    # Wyczyść też cache dywidend
     from services.dividends import clear_div_cache
     clear_div_cache()
 
@@ -225,7 +220,6 @@ async def api_benchmark(ticker: str, start: str, end: str):
 
 @app.get("/api/daily")
 async def api_daily(portfolio_id: str = "default"):
-    """Zwraca dzienny stan portfela. Używa cache cen."""
     portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
     result = []
     for ticker, pos in portfolio.items():
@@ -240,7 +234,7 @@ async def api_daily(portfolio_id: str = "default"):
             "value": value,
             "cost": pos["cost"],
             "pnl": pnl,
-            "daily_change": None,  # obliczane osobno jeśli potrzebne
+            "daily_change": None,
         })
     result.sort(key=lambda x: x["value"] or 0, reverse=True)
     return result
@@ -399,11 +393,7 @@ async def api_save_rebalancing(portfolio_id: str, request: Request):
 
 
 @app.get("/api/montecarlo")
-async def api_montecarlo(
-    portfolio_id: str = "default",
-    years: int = 5,
-    monthly: float = 0
-):
+async def api_montecarlo(portfolio_id: str = "default", years: int = 5, monthly: float = 0):
     from services.analytics import monte_carlo_simulation
     data = build_portfolio_history(portfolio_id)
     if not data or not data.get("total"):
@@ -442,26 +432,21 @@ async def api_goals(portfolio_id: str = "default"):
 
 @app.post("/api/goals")
 async def api_add_goal(portfolio_id: str, request: Request):
-    from services.goals import load_goals, save_goals
+    from services.goals import add_goal
     data = await request.json()
-    goals = load_goals(portfolio_id)
-    goal = {
-        "id": datetime.now().strftime("%Y%m%d%H%M%S"),
-        "name": data.get("name", "Cel"),
-        "target": float(data.get("target", 0)),
-        "deadline": data.get("deadline", "2030-01-01"),
-        "monthly_investment": float(data.get("monthly_investment", 0)),
-    }
-    goals.append(goal)
-    save_goals(portfolio_id, goals)
-    return goal
+    return add_goal(
+        portfolio_id,
+        name=data.get("name", "Cel"),
+        target=float(data.get("target", 0)),
+        deadline=data.get("deadline", "2030-01-01"),
+        monthly_investment=float(data.get("monthly_investment", 0)),
+    )
 
 
 @app.delete("/api/goals/{goal_id}")
 async def api_delete_goal(portfolio_id: str, goal_id: str):
-    from services.goals import load_goals, save_goals
-    goals = [g for g in load_goals(portfolio_id) if g["id"] != goal_id]
-    save_goals(portfolio_id, goals)
+    from services.goals import delete_goal
+    delete_goal(portfolio_id, goal_id)
     return {"ok": True}
 
 
@@ -479,7 +464,7 @@ async def api_alerts(portfolio_id: str = "default"):
 async def api_add_alert(request: Request, portfolio_id: str = "default"):
     from services.alerts import add_alert
     data = await request.json()
-    alert = add_alert(
+    return add_alert(
         portfolio_id,
         alert_type=data.get("type", "price"),
         ticker=data.get("ticker"),
@@ -487,7 +472,6 @@ async def api_add_alert(request: Request, portfolio_id: str = "default"):
         value=float(data.get("value", 0)),
         name=data.get("name", ""),
     )
-    return alert
 
 
 @app.delete("/api/alerts/{alert_id}")
@@ -496,15 +480,23 @@ async def api_delete_alert(alert_id: str, portfolio_id: str = "default"):
     delete_alert(portfolio_id, alert_id)
     return {"ok": True}
 
+
+@app.get("/api/sectors")
+async def api_sectors(portfolio_id: str = "default"):
+    from services.sectors import get_sector_summary
+    portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
+    return get_sector_summary(portfolio, prices)
+
+
 @app.get("/api/dashboard_data")
 async def api_dashboard_data(portfolio_id: str = "default"):
-    """Jeden endpoint zwracający wszystkie dane dashboardu równolegle."""
     from concurrent.futures import ThreadPoolExecutor
     from services.analytics import calculate_drawdown, calculate_risk_metrics, calculate_correlation, monte_carlo_simulation
     from services.categories import get_categories_summary
     from services.rebalancing import load_targets, calculate_rebalancing
     from services.dividends import get_dividend_summary
     from services.goals import load_goals, calculate_goal_progress
+    from services.sectors import get_sector_summary
 
     portfolio, tickers, prices, total_value, total_cost = _portfolio_context(portfolio_id)
     hist = build_portfolio_history(portfolio_id)
@@ -558,15 +550,19 @@ async def api_dashboard_data(portfolio_id: str = "default"):
         alerts = load_alerts(portfolio_id)
         return {"alerts": alerts, "triggered": triggered}
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        f_analytics    = executor.submit(get_analytics)
-        f_correlation  = executor.submit(get_correlation)
-        f_montecarlo   = executor.submit(get_montecarlo)
-        f_categories   = executor.submit(get_categories)
-        f_rebalancing  = executor.submit(get_rebalancing)
-        f_dividends    = executor.submit(get_dividends)
-        f_goals        = executor.submit(get_goals)
-        f_alerts       = executor.submit(get_alerts)
+    def get_sectors():
+        return get_sector_summary(portfolio, prices)
+
+    with ThreadPoolExecutor(max_workers=9) as executor:
+        f_analytics   = executor.submit(get_analytics)
+        f_correlation = executor.submit(get_correlation)
+        f_montecarlo  = executor.submit(get_montecarlo)
+        f_categories  = executor.submit(get_categories)
+        f_rebalancing = executor.submit(get_rebalancing)
+        f_dividends   = executor.submit(get_dividends)
+        f_goals       = executor.submit(get_goals)
+        f_alerts      = executor.submit(get_alerts)
+        f_sectors     = executor.submit(get_sectors)
 
         return {
             "analytics":   f_analytics.result(),
@@ -577,8 +573,8 @@ async def api_dashboard_data(portfolio_id: str = "default"):
             "dividends":   f_dividends.result(),
             "goals":       f_goals.result(),
             "alerts":      f_alerts.result(),
+            "sectors":     f_sectors.result(),
         }
-
 
 
 if __name__ == "__main__":
