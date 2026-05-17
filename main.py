@@ -22,8 +22,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 
-# --- Pomocnicze ---
-
 def _portfolio_context(portfolio_id: str):
     portfolio = get_portfolio_holdings(portfolio_id)
     tickers = list(portfolio.keys())
@@ -32,8 +30,6 @@ def _portfolio_context(portfolio_id: str):
     total_cost = sum(portfolio[t]["cost"] for t in tickers)
     return portfolio, tickers, prices, total_value, total_cost
 
-
-# --- Strony ---
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -158,7 +154,6 @@ async def upload_files(
                 raise ValueError(f"Nieobsługiwany format: {suffix}")
 
             stats = merge_transactions_to(portfolio_id, rows)
-
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             archive_name = f"{timestamp}_{file.filename}"
             shutil.copy(tmp_path, os.path.join(IMPORTS_DIR, archive_name))
@@ -254,8 +249,7 @@ async def api_portfolios():
 @app.post("/api/portfolios")
 async def api_create_portfolio(request: Request):
     data = await request.json()
-    p = create_portfolio(data.get("name", "Nowy portfel"), data.get("description", ""))
-    return p
+    return create_portfolio(data.get("name", "Nowy portfel"), data.get("description", ""))
 
 
 @app.delete("/api/portfolios/{portfolio_id}")
@@ -356,12 +350,7 @@ async def api_ticker_history(ticker: str, portfolio_id: str = "default"):
         "ticker": ticker,
         "prices": prices_hist,
         "transactions": [
-            {
-                "date": t["date"],
-                "type": t["type"],
-                "quantity": float(t["quantity"]),
-                "price": float(t["price"]),
-            }
+            {"date": t["date"], "type": t["type"], "quantity": float(t["quantity"]), "price": float(t["price"])}
             for t in sorted(ticker_txs, key=lambda x: x["date"])
         ]
     }
@@ -488,6 +477,14 @@ async def api_sectors(portfolio_id: str = "default"):
     return get_sector_summary(portfolio, prices)
 
 
+@app.get("/api/inflation")
+async def api_inflation(portfolio_id: str = "default"):
+    from services.inflation import get_inflation_data, calculate_real_return
+    inflation_data = get_inflation_data()
+    hist = build_portfolio_history(portfolio_id)
+    return calculate_real_return(hist, inflation_data)
+
+
 @app.get("/api/dashboard_data")
 async def api_dashboard_data(portfolio_id: str = "default"):
     from concurrent.futures import ThreadPoolExecutor
@@ -497,6 +494,7 @@ async def api_dashboard_data(portfolio_id: str = "default"):
     from services.dividends import get_dividend_summary
     from services.goals import load_goals, calculate_goal_progress
     from services.sectors import get_sector_summary
+    from services.inflation import get_inflation_data, calculate_real_return
 
     portfolio, tickers, prices, total_value, total_cost = _portfolio_context(portfolio_id)
     hist = build_portfolio_history(portfolio_id)
@@ -553,7 +551,11 @@ async def api_dashboard_data(portfolio_id: str = "default"):
     def get_sectors():
         return get_sector_summary(portfolio, prices)
 
-    with ThreadPoolExecutor(max_workers=9) as executor:
+    def get_inflation():
+        inflation_data = get_inflation_data()
+        return calculate_real_return(hist, inflation_data)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
         f_analytics   = executor.submit(get_analytics)
         f_correlation = executor.submit(get_correlation)
         f_montecarlo  = executor.submit(get_montecarlo)
@@ -563,6 +565,7 @@ async def api_dashboard_data(portfolio_id: str = "default"):
         f_goals       = executor.submit(get_goals)
         f_alerts      = executor.submit(get_alerts)
         f_sectors     = executor.submit(get_sectors)
+        f_inflation   = executor.submit(get_inflation)
 
         return {
             "analytics":   f_analytics.result(),
@@ -574,6 +577,7 @@ async def api_dashboard_data(portfolio_id: str = "default"):
             "goals":       f_goals.result(),
             "alerts":      f_alerts.result(),
             "sectors":     f_sectors.result(),
+            "inflation":   f_inflation.result(),
         }
 
 
