@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analiza techniczna — Stockr</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #0f1117; --bg-card: #1a1d27; --bg-inner: #0f1117; --bg-nav: #13151f;
+      --border: #2d3148; --border2: #1e2235; --text: #e2e8f0; --text-muted: #64748b;
+      --text-dim: #475569; --accent: #6366f1; --accent-lt: #a5b4fc; --input-bg: #0f1117;
+    }
+    body.light {
+      --bg: #f1f5f9; --bg-card: #ffffff; --bg-inner: #f8fafc; --bg-nav: #ffffff;
+      --border: #e2e8f0; --border2: #e9edf3; --text: #0f172a; --text-muted: #475569;
+      --text-dim: #64748b; --accent: #6366f1; --accent-lt: #4f46e5; --input-bg: #f8fafc;
+    }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; transition: background .2s, color .2s; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; }
+    .nav-link { color: var(--text-muted); text-decoration: none; font-size: 13px; transition: color .15s; }
+    .nav-link:hover { color: var(--text); }
+    select, input { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; color: var(--text); font-size: 12px; outline: none; }
+    select:focus, input:focus { border-color: var(--accent); }
+    #theme-toggle { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-size: 16px; color: var(--text-muted); }
+    .signal-buy { background: #34d39920; border: 1px solid #34d39940; color: #34d399; }
+    .signal-sell { background: #f8717120; border: 1px solid #f8717140; color: #f87171; }
+    .signal-neutral { background: #f59e0b20; border: 1px solid #f59e0b40; color: #f59e0b; }
+    .indicator-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 500; }
+  </style>
+</head>
+<body class="min-h-screen">
+
+<nav style="background:var(--bg-nav);border-bottom:1px solid var(--border2);" class="px-6 py-3 flex items-center gap-6 sticky top-0 z-10">
+  <span style="color:var(--accent-lt);font-weight:600;font-size:15px;">📊 Portfel</span>
+  <a href="/dashboard?portfolio_id={{ portfolio_id }}" class="nav-link">Dashboard</a>
+  <a href="/table?portfolio_id={{ portfolio_id }}" class="nav-link">Tabela</a>
+  <a href="/add?portfolio_id={{ portfolio_id }}" class="nav-link">+ Transakcja</a>
+  <a href="/upload" class="nav-link">Import</a>
+  <a href="/analysis?portfolio_id={{ portfolio_id }}" class="nav-link" style="color:var(--text);">Analiza</a>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <button id="theme-toggle" onclick="toggleTheme()" title="Tryb jasny/ciemny">☀️</button>
+    <span style="font-size:11px;color:var(--text-dim);">Portfel:</span>
+    <select onchange="window.location.href='/analysis?portfolio_id='+this.value" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:5px 10px;color:var(--text);font-size:12px;max-width:180px;">
+      {% for p in portfolios %}<option value="{{ p.id }}" {% if p.id == portfolio_id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+    </select>
+  </div>
+</nav>
+
+<div class="p-4 md:p-6 max-w-screen-xl mx-auto">
+
+  <!-- Wybór spółki i okresu -->
+  <div class="card p-4 mb-4" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;">
+    <h1 style="font-size:15px;font-weight:600;color:var(--text);">Analiza techniczna</h1>
+    <select id="ticker-select" onchange="loadAnalysis()" style="font-size:13px;padding:6px 12px;">
+      {% for t in tickers %}<option value="{{ t }}" {% if t == selected_ticker %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+    <select id="period-select" onchange="loadAnalysis()" style="font-size:13px;padding:6px 12px;">
+      <option value="90">3 miesiące</option>
+      <option value="180">6 miesięcy</option>
+      <option value="365" selected>1 rok</option>
+      <option value="730">2 lata</option>
+    </select>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="show-ma" checked onchange="updateMainChart()"> MA20/50</label>
+      <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="show-bb" checked onchange="updateMainChart()"> Bollinger</label>
+    </div>
+    <div id="loading" style="font-size:12px;color:var(--text-muted);display:none;">⏳ Ładowanie...</div>
+  </div>
+
+  <!-- Sygnał + statystyki -->
+  <div id="stats-row" style="display:none;" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+    <div class="card p-4">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">CENA</div>
+      <div id="stat-price" style="font-size:20px;font-weight:600;color:var(--text);">—</div>
+      <div id="stat-change-1d" style="font-size:12px;margin-top:2px;">—</div>
+    </div>
+    <div class="card p-4">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">RSI (14)</div>
+      <div id="stat-rsi" style="font-size:20px;font-weight:600;">—</div>
+      <div id="stat-rsi-label" style="font-size:11px;color:var(--text-dim);margin-top:2px;">—</div>
+    </div>
+    <div class="card p-4">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">52-TYDZIEŃ</div>
+      <div id="stat-52w" style="font-size:13px;font-weight:500;color:var(--text);margin-top:4px;">—</div>
+    </div>
+    <div class="card p-4">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">SYGNAŁ</div>
+      <div id="signal-badge" style="margin-top:6px;display:inline-block;padding:4px 14px;border-radius:8px;font-size:13px;font-weight:600;">—</div>
+    </div>
+  </div>
+
+  <!-- Powody sygnału -->
+  <div id="signal-reasons" style="display:none;" class="card p-4 mb-4">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;" id="signal-reasons-list"></div>
+  </div>
+
+  <!-- Wykres główny: cena + MA + BB -->
+  <div class="card p-5 mb-4">
+    <h2 style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:16px;">Cena + Średnie ruchome + Bollinger Bands</h2>
+    <canvas id="chart-price" height="80"></canvas>
+  </div>
+
+  <!-- Wolumen -->
+  <div class="card p-5 mb-4">
+    <h2 style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:16px;">Wolumen</h2>
+    <canvas id="chart-volume" height="35"></canvas>
+  </div>
+
+  <!-- RSI -->
+  <div class="card p-5 mb-4">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h2 style="font-size:13px;font-weight:600;color:var(--text);">RSI (14)</h2>
+      <div style="font-size:11px;color:var(--text-dim);">
+        <span style="color:#f87171;">▬ Wykupiony (&gt;70)</span> &nbsp;
+        <span style="color:#34d399;">▬ Wyprzedany (&lt;30)</span>
+      </div>
+    </div>
+    <canvas id="chart-rsi" height="35"></canvas>
+  </div>
+
+  <!-- MACD -->
+  <div class="card p-5 mb-4">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h2 style="font-size:13px;font-weight:600;color:var(--text);">MACD (12, 26, 9)</h2>
+      <div style="font-size:11px;color:var(--text-dim);">
+        <span style="color:#6366f1;">▬ MACD</span> &nbsp;
+        <span style="color:#f59e0b;">▬ Signal</span> &nbsp;
+        <span style="color:#334155;">▬ Histogram</span>
+      </div>
+    </div>
+    <canvas id="chart-macd" height="40"></canvas>
+  </div>
+
+</div>
+
+<script>
+const PORTFOLIO_ID = "{{ portfolio_id }}";
+let analysisData = null;
+let chartPrice = null, chartVolume = null, chartRsi = null, chartMacd = null;
+
+// --- THEME ---
+function initTheme() {
+  const saved = localStorage.getItem('stockr-theme') || 'dark';
+  document.body.classList.toggle('light', saved === 'light');
+  document.getElementById('theme-toggle').textContent = saved === 'light' ? '🌙' : '☀️';
+}
+function toggleTheme() {
+  const current = localStorage.getItem('stockr-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.body.classList.toggle('light', next === 'light');
+  document.getElementById('theme-toggle').textContent = next === 'light' ? '🌙' : '☀️';
+  localStorage.setItem('stockr-theme', next);
+}
+
+// --- CHART OPTS ---
+function chartOpts(unit = '', spanGaps = true) {
+  return {
+    responsive: true, spanGaps, animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { labels: { color: '#64748b', font: { size: 11 }, boxWidth: 10, padding: 10 } },
+      tooltip: { backgroundColor: '#1e2235', borderColor: '#2d3148', borderWidth: 1, titleColor: '#94a3b8', bodyColor: '#e2e8f0', padding: 10,
+        callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw !== null ? Number(ctx.raw).toFixed(unit === '%' ? 1 : 2) : '—'} ${unit}` }
+      }
+    },
+    scales: {
+      x: { type: 'time', time: { unit: 'month', tooltipFormat: 'dd.MM.yyyy' }, ticks: { color: '#334155', font: { size: 10 }, maxTicksLimit: 12 }, grid: { color: '#1a1d2a' } },
+      y: { ticks: { color: '#334155', font: { size: 10 } }, grid: { color: '#1a1d2a' } }
+    }
+  };
+}
+
+// --- LOAD ANALYSIS ---
+async function loadAnalysis() {
+  const ticker = document.getElementById('ticker-select').value;
+  const period = document.getElementById('period-select').value;
+  if (!ticker) return;
+
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('stats-row').style.display = 'none';
+  document.getElementById('signal-reasons').style.display = 'none';
+
+  try {
+    const resp = await fetch(`/api/analysis/${ticker}?period=${period}`);
+    analysisData = await resp.json();
+    if (analysisData.error) {
+      alert('Błąd: ' + analysisData.error);
+      return;
+    }
+    renderStats();
+    updateMainChart();
+    renderVolume();
+    renderRSI();
+    renderMACD();
+    document.getElementById('stats-row').style.display = 'grid';
+  } catch (e) {
+    console.error(e);
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+  }
+}
+
+// --- STATS ---
+function renderStats() {
+  const { stats, signal } = analysisData;
+
+  document.getElementById('stat-price').textContent = stats.current_price?.toFixed(2) + ' PLN';
+  const ch1d = stats.price_change_1d;
+  const el1d = document.getElementById('stat-change-1d');
+  el1d.textContent = ch1d !== null ? (ch1d >= 0 ? '+' : '') + ch1d.toFixed(2) + '% (1D)' : '—';
+  el1d.style.color = ch1d >= 0 ? '#34d399' : '#f87171';
+
+  const rsi = stats.current_rsi;
+  document.getElementById('stat-rsi').textContent = rsi?.toFixed(1) ?? '—';
+  document.getElementById('stat-rsi').style.color = rsi > 70 ? '#f87171' : rsi < 30 ? '#34d399' : '#e2e8f0';
+  document.getElementById('stat-rsi-label').textContent = rsi > 70 ? 'Wykupiony' : rsi < 30 ? 'Wyprzedany' : 'Neutralny';
+
+  document.getElementById('stat-52w').innerHTML =
+    `Max: <strong style="color:#34d399;">${stats.price_high_52w?.toFixed(2)}</strong><br>Min: <strong style="color:#f87171;">${stats.price_low_52w?.toFixed(2)}</strong>`;
+
+  const badge = document.getElementById('signal-badge');
+  badge.textContent = signal.signal === 'buy' ? '▲ KUPNO' : signal.signal === 'sell' ? '▼ SPRZEDAŻ' : '● NEUTRALNY';
+  badge.className = 'indicator-badge signal-' + signal.signal;
+
+  // Powody
+  const reasons = document.getElementById('signal-reasons');
+  const list = document.getElementById('signal-reasons-list');
+  const allReasons = [
+    ...(signal.bullish || []).map(r => ({ text: r, type: 'buy' })),
+    ...(signal.bearish || []).map(r => ({ text: r, type: 'sell' })),
+  ];
+  if (allReasons.length) {
+    list.innerHTML = allReasons.map(r =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;font-size:11px;background:${r.type === 'buy' ? '#34d39915' : '#f8717115'};color:${r.type === 'buy' ? '#34d399' : '#f87171'};border:1px solid ${r.type === 'buy' ? '#34d39930' : '#f8717130'};">${r.type === 'buy' ? '▲' : '▼'} ${r.text}</span>`
+    ).join('');
+    reasons.style.display = 'block';
+  }
+}
+
+// --- MAIN CHART ---
+function updateMainChart() {
+  if (!analysisData) return;
+  const { dates, prices, indicators } = analysisData;
+  const showMA = document.getElementById('show-ma').checked;
+  const showBB = document.getElementById('show-bb').checked;
+
+  const datasets = [
+    {
+      label: 'Cena',
+      data: prices,
+      borderColor: '#6366f1',
+      backgroundColor: '#6366f108',
+      fill: true,
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+      order: 3,
+    }
+  ];
+
+  if (showMA) {
+    datasets.push({
+      label: 'MA20',
+      data: indicators.ma20,
+      borderColor: '#f59e0b',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      tension: 0.3,
+      order: 2,
+    });
+    datasets.push({
+      label: 'MA50',
+      data: indicators.ma50,
+      borderColor: '#22d3ee',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderDash: [4, 3],
+      pointRadius: 0,
+      tension: 0.3,
+      order: 2,
+    });
+  }
+
+  if (showBB) {
+    datasets.push({
+      label: 'BB Górny',
+      data: indicators.bb_upper,
+      borderColor: '#a78bfa40',
+      backgroundColor: '#a78bfa08',
+      borderWidth: 1,
+      borderDash: [3, 3],
+      pointRadius: 0,
+      tension: 0.3,
+      fill: '+2',
+      order: 1,
+    });
+    datasets.push({
+      label: 'BB Środkowy',
+      data: indicators.bb_middle,
+      borderColor: '#a78bfa60',
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderDash: [3, 3],
+      pointRadius: 0,
+      tension: 0.3,
+      order: 1,
+    });
+    datasets.push({
+      label: 'BB Dolny',
+      data: indicators.bb_lower,
+      borderColor: '#a78bfa40',
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderDash: [3, 3],
+      pointRadius: 0,
+      tension: 0.3,
+      order: 1,
+    });
+  }
+
+  const ctx = document.getElementById('chart-price').getContext('2d');
+  if (chartPrice) chartPrice.destroy();
+  chartPrice = new Chart(ctx, { type: 'line', data: { labels: dates, datasets }, options: chartOpts('PLN') });
+}
+
+// --- WOLUMEN ---
+function renderVolume() {
+  const { dates, volumes } = analysisData;
+  const avg = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+  const ctx = document.getElementById('chart-volume').getContext('2d');
+  if (chartVolume) chartVolume.destroy();
+  chartVolume = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: dates,
+      datasets: [{
+        label: 'Wolumen',
+        data: volumes,
+        backgroundColor: volumes.map(v => v > avg ? '#6366f160' : '#33415540'),
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      ...chartOpts(''),
+      plugins: { ...chartOpts('').plugins, legend: { display: false } },
+    }
+  });
+}
+
+// --- RSI ---
+function renderRSI() {
+  const { dates, indicators } = analysisData;
+  const ctx = document.getElementById('chart-rsi').getContext('2d');
+  if (chartRsi) chartRsi.destroy();
+
+  const opts = {
+    ...chartOpts('%'),
+    scales: {
+      ...chartOpts('%').scales,
+      y: {
+        min: 0, max: 100,
+        ticks: { color: '#334155', font: { size: 10 }, callback: v => v + '%' },
+        grid: { color: '#1a1d2a' }
+      }
+    },
+    plugins: {
+      ...chartOpts('%').plugins,
+      legend: { display: false },
+      annotation: {},
+    }
+  };
+
+  chartRsi = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: 'RSI',
+          data: indicators.rsi,
+          borderColor: '#a78bfa',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.3,
+        },
+        {
+          label: 'Wykupiony (70)',
+          data: Array(dates.length).fill(70),
+          borderColor: '#f8717150',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [4, 3],
+          pointRadius: 0,
+        },
+        {
+          label: 'Wyprzedany (30)',
+          data: Array(dates.length).fill(30),
+          borderColor: '#34d39950',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderDash: [4, 3],
+          pointRadius: 0,
+        },
+      ]
+    },
+    options: opts
+  });
+}
+
+// --- MACD ---
+function renderMACD() {
+  const { dates, indicators } = analysisData;
+  const ctx = document.getElementById('chart-macd').getContext('2d');
+  if (chartMacd) chartMacd.destroy();
+
+  chartMacd = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: 'Histogram',
+          data: indicators.macd_histogram,
+          backgroundColor: indicators.macd_histogram.map(v => v === null ? 'transparent' : v >= 0 ? '#34d39960' : '#f8717160'),
+          borderWidth: 0,
+          order: 3,
+        },
+        {
+          label: 'MACD',
+          data: indicators.macd,
+          type: 'line',
+          borderColor: '#6366f1',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.3,
+          order: 1,
+        },
+        {
+          label: 'Signal',
+          data: indicators.macd_signal,
+          type: 'line',
+          borderColor: '#f59e0b',
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          borderDash: [4, 3],
+          pointRadius: 0,
+          tension: 0.3,
+          order: 2,
+        },
+      ]
+    },
+    options: chartOpts('')
+  });
+}
+
+// --- INIT ---
+initTheme();
+loadAnalysis();
+</script>
+</body>
+</html>

@@ -581,5 +581,28 @@ async def api_dashboard_data(portfolio_id: str = "default"):
         }
 
 
+@app.get("/analysis", response_class=HTMLResponse)
+async def analysis_page(request: Request, portfolio_id: str = "default", ticker: str = ""):
+    ensure_setup()
+    portfolios = load_portfolios()
+    portfolio, tickers, prices, _, _ = _portfolio_context(portfolio_id)
+    current = next((p for p in portfolios if p["id"] == portfolio_id), portfolios[0])
+    return templates.TemplateResponse(
+        request=request,
+        name="analysis.html",
+        context={
+            "portfolios": portfolios,
+            "current_portfolio": current,
+            "portfolio_id": portfolio_id,
+            "tickers": tickers,
+            "selected_ticker": ticker or (tickers[0] if tickers else ""),
+        }
+    )
+
+@app.get("/api/analysis/{ticker}")
+async def api_analysis(ticker: str, period: int = 365):
+    from services.technical import get_technical_analysis
+    return get_technical_analysis(ticker, period)
+
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True)
