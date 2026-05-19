@@ -1,49 +1,108 @@
-{% extends "base.html" %}
-{% block content %}
-<h1 class="text-2xl font-semibold mb-6">Dodaj transakcję</h1>
-<form method="post" action="/add" class="bg-white rounded-xl shadow-sm p-6 max-w-md space-y-4">
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dodaj transakcję — Stockr</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #0f1117; --bg-card: #1a1d27; --bg-inner: #0f1117; --bg-nav: #13151f;
+      --border: #2d3148; --border2: #1e2235; --text: #e2e8f0; --text-muted: #64748b;
+      --text-dim: #475569; --accent: #6366f1; --accent-lt: #a5b4fc; --input-bg: #0f1117;
+    }
+    body.light {
+      --bg: #f1f5f9; --bg-card: #ffffff; --bg-inner: #f8fafc; --bg-nav: #ffffff;
+      --border: #e2e8f0; --border2: #e9edf3; --text: #0f172a; --text-muted: #475569;
+      --text-dim: #64748b; --accent: #6366f1; --accent-lt: #4f46e5; --input-bg: #f8fafc;
+    }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; transition: background .2s, color .2s; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; }
+    .nav-link { color: var(--text-muted); text-decoration: none; font-size: 13px; transition: color .15s; }
+    .nav-link:hover { color: var(--text); }
+    label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 5px; }
+    input, select { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; width: 100%; }
+    input:focus, select:focus { border-color: var(--accent); }
+    #theme-toggle { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-size: 16px; color: var(--text-muted); }
+  </style>
+</head>
+<body class="min-h-screen">
 
-  <div>
-    <label class="block text-sm font-medium mb-1">Ticker</label>
-    <input name="ticker" placeholder="np. CDR, PKN.WA, SPY"
-      class="w-full border rounded-lg px-3 py-2 text-sm" required>
-    <p class="text-xs text-gray-400 mt-1">GPW: użyj formatu PKN.WA · Zagraniczne: SPY, AAPL</p>
-  </div>
-
-  <div>
-    <label class="block text-sm font-medium mb-1">Data</label>
-    <input name="date" type="date" class="w-full border rounded-lg px-3 py-2 text-sm" required>
-  </div>
-
-  <div>
-    <label class="block text-sm font-medium mb-1">Typ</label>
-    <select name="type" class="w-full border rounded-lg px-3 py-2 text-sm">
-      <option value="buy">Kupno</option>
-      <option value="sell">Sprzedaż</option>
+<nav style="background:var(--bg-nav);border-bottom:1px solid var(--border2);" class="px-6 py-3 flex items-center gap-6 sticky top-0 z-10">
+  <span style="color:var(--accent-lt);font-weight:600;font-size:15px;">📊 Portfel</span>
+  <a href="/dashboard?portfolio_id={{ portfolio_id }}" class="nav-link">Dashboard</a>
+  <a href="/table?portfolio_id={{ portfolio_id }}" class="nav-link">Tabela</a>
+  <a href="/upload" class="nav-link">Import</a>
+  <a href="/analysis?portfolio_id={{ portfolio_id }}" class="nav-link">Analiza</a>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <button id="theme-toggle" onclick="toggleTheme()" title="Tryb jasny/ciemny">☀️</button>
+    <span style="font-size:11px;color:var(--text-dim);">Portfel:</span>
+    <select onchange="window.location.href='/add?portfolio_id='+this.value" style="max-width:180px;padding:5px 10px;">
+      {% for p in portfolios %}<option value="{{ p.id }}" {% if p.id == portfolio_id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
     </select>
   </div>
+</nav>
 
-  <div>
-    <label class="block text-sm font-medium mb-1">Ilość</label>
-    <input name="quantity" type="number" step="0.0001" min="0"
-      class="w-full border rounded-lg px-3 py-2 text-sm" required>
+<div class="p-4 md:p-6 max-w-lg mx-auto">
+  <div class="card p-6">
+    <h1 style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:20px;">Dodaj transakcję</h1>
+
+    <form method="post" action="/add">
+      <input type="hidden" name="portfolio_id" value="{{ portfolio_id }}">
+
+      <div style="margin-bottom:14px;">
+        <label>Ticker</label>
+        <input name="ticker" placeholder="np. XTB.PL, PKN.WA, SPY" required>
+        <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">GPW: użyj formatu PKN.WA lub XTB.PL · Zagraniczne: SPY, AAPL</p>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label>Data</label>
+        <input name="date" type="date" required>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label>Typ</label>
+        <select name="type">
+          <option value="buy">Kupno</option>
+          <option value="sell">Sprzedaż</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label>Ilość</label>
+        <input name="quantity" type="number" step="0.0001" min="0" placeholder="np. 10" required>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label>Cena (PLN)</label>
+        <input name="price" type="number" step="0.01" min="0" placeholder="np. 125.50" required>
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <label>Prowizja (PLN)</label>
+        <input name="commission" type="number" step="0.01" value="0" placeholder="0.00">
+      </div>
+
+      <div style="display:flex;gap:8px;">
+        <button type="submit"
+          style="flex:1;background:#6366f1;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:500;cursor:pointer;">
+          Zapisz transakcję
+        </button>
+        <a href="/dashboard?portfolio_id={{ portfolio_id }}"
+          style="flex:1;display:flex;align-items:center;justify-content:center;background:var(--bg-inner);border:1px solid var(--border);color:var(--text-muted);border-radius:8px;padding:10px;font-size:13px;text-decoration:none;">
+          Anuluj
+        </a>
+      </div>
+    </form>
   </div>
+</div>
 
-  <div>
-    <label class="block text-sm font-medium mb-1">Cena (PLN)</label>
-    <input name="price" type="number" step="0.01" min="0"
-      class="w-full border rounded-lg px-3 py-2 text-sm" required>
-  </div>
-
-  <div>
-    <label class="block text-sm font-medium mb-1">Prowizja (PLN)</label>
-    <input name="commission" type="number" step="0.01" value="0"
-      class="w-full border rounded-lg px-3 py-2 text-sm">
-  </div>
-
-  <button type="submit"
-    class="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">
-    Zapisz transakcję
-  </button>
-</form>
-{% endblock %}
+<script>
+function initTheme(){const s=localStorage.getItem('stockr-theme')||'dark';document.body.classList.toggle('light',s==='light');document.getElementById('theme-toggle').textContent=s==='light'?'🌙':'☀️';}
+function toggleTheme(){const c=localStorage.getItem('stockr-theme')||'dark',n=c==='dark'?'light':'dark';document.body.classList.toggle('light',n==='light');document.getElementById('theme-toggle').textContent=n==='light'?'🌙':'☀️';localStorage.setItem('stockr-theme',n);}
+initTheme();
+</script>
+</body>
+</html>
